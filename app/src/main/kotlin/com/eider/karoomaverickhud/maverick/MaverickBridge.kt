@@ -70,7 +70,7 @@ class MaverickBridge(
 
     fun update(snapshot: HudSnapshot) {
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
-        if (snapshot.pages.isNotEmpty() && pageIndex >= snapshot.pages.size) pageIndex = 0
+        if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
         val stamped = snapshot.copy(pageIndex = pageIndex)
         lastSnapshot = stamped
         hudScreen.apply(stamped)

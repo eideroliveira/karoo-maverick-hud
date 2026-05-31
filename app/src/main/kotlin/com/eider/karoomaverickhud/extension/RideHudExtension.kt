@@ -109,7 +109,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         // active Karoo page's top fields; AUTO/MANUAL use the user's custom pages.
         val layoutFlow = configFlow.combine(activePageFlow) { cfg, active ->
             if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
-                val fields = active?.page?.elements?.map { it.dataTypeId }?.take(MAX_CELLS).orEmpty()
+                val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(MAX_CELLS)?.toList().orEmpty()
                 if (fields.isEmpty()) emptyList() else listOf(fields)
             } else {
                 cfg.pages.map { it.take(MAX_CELLS) }.filter { it.isNotEmpty() }
