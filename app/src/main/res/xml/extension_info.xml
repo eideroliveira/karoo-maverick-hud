@@ -5,4 +5,11 @@
     icon="@drawable/ic_hud"
     scansDevices="false"
     mapLayer="false"
-    fitFile="false" />
+    fitFile="false">
+    <DataType
+        displayName="@string/glasses_field"
+        description="@string/glasses_field_desc"
+        graphical="true"
+        icon="@drawable/ic_hud"
+        typeId="glasses" />
+</ExtensionInfo>

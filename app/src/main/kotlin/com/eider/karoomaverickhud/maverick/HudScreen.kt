@@ -93,7 +93,7 @@ class HudScreen : Screen(420f, 150f) {
             .addTo(this)
     }
 
-    override fun onUpdateUI(time: Long) {
+    override fun onUpdateUI(timestampMs: Long) {
         val snap = snapshot
         val page = pages[snap.pageIndex.coerceIn(0, pages.lastIndex)]
         for (i in 0..3) {

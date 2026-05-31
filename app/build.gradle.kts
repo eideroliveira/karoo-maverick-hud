@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.eider.karoomaverickhud"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.eider.karoomaverickhud"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -43,6 +43,13 @@ android {
             "META-INF/AL2.0",
             "META-INF/LGPL2.1",
         )
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            val output = this as? com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output?.outputFileName = "maverick-hud.apk"
+        }
     }
 }
 

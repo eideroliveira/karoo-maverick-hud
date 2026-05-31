@@ -1,6 +1,7 @@
+package io.hammerhead.karooext
+
 import android.content.Context
 import android.widget.RemoteViews
-import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter

@@ -31,7 +31,7 @@ faster — ANT+/BLE cycling sensors don't update more often than that.
 
 # 2. Side-load to the Karoo:
 adb connect <karoo-ip>:5555
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/maverick-hud.apk
 
 # 3. On the Karoo: Settings → Extensions → enable "Maverick HUD"
 #    Then launch the app once to pair with the glasses.

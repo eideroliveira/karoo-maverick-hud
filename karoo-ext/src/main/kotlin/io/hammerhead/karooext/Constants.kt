@@ -18,6 +18,8 @@
 
 package io.hammerhead.karooext
 
+import io.hammerhead.karooext.BuildConfig
+
 /**
  * Current version of the karoo-ext library dependency.
  */

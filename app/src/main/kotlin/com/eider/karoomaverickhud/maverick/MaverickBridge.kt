@@ -20,6 +20,16 @@ import kotlinx.coroutines.launch
 import timber.log.Timber
 
 /**
+ * Process-wide mirror of the glasses link state, so the ride data field
+ * ([com.eider.karoomaverickhud.extension.GlassesDataType]) can reflect it without
+ * being wired to a [MaverickBridge] instance (the bridge is owned by the extension
+ * service and built lazily). [MaverickBridge] is the sole writer.
+ */
+object GlassesLinkState {
+    val connected = MutableStateFlow(value = false)
+}
+
+/**
  * Owns the Maverick connection lifecycle and the single mounted [HudScreen].
  *
  *  - SDK init/start happens in [com.eider.karoomaverickhud.KHudApplication].
@@ -30,10 +40,10 @@ import timber.log.Timber
  *  - Auto-cycle stamps a page index into each snapshot before forwarding.
  */
 class MaverickBridge(
-    private val context: Context,
+    context: Context,
     private val scope: CoroutineScope,
 ) {
-    private val _connectionState = MutableStateFlow(false)
+    private val _connectionState = MutableStateFlow(value = false)
     val connectionState: StateFlow<Boolean> = _connectionState.asStateFlow()
 
     private val configState: StateFlow<HudConfig> =
@@ -86,14 +96,15 @@ class MaverickBridge(
             val deadline = SystemClock.elapsedRealtime() + CONNECT_TIMEOUT_MS
             var everConnected = false
             while (isActive) {
-                val connected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(false)
+                val connected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(defaultValue = false)
                 if (connected != _connectionState.value) {
                     _connectionState.value = connected
+                    GlassesLinkState.connected.value = connected
                     if (!connected) screenMounted = false
                 }
                 when {
                     connected -> everConnected = true
-                    !everConnected && SystemClock.elapsedRealtime() >= deadline -> {
+                    (!everConnected) && (SystemClock.elapsedRealtime() >= deadline) -> {
                         Timber.w("Maverick connect timed out after ${CONNECT_TIMEOUT_MS / 1000}s; giving up for this ride")
                         return@launch
                     }
@@ -110,6 +121,7 @@ class MaverickBridge(
         connectionJob = null
         screenMounted = false
         if (_connectionState.value) _connectionState.value = false
+        GlassesLinkState.connected.value = false
         runCatching { Evs.instance().comm().disconnect() }
             .onFailure { Timber.w(it, "Evs disconnect on ride end failed") }
     }

@@ -112,14 +112,16 @@ class KarooSystemService(private val context: Context) {
         intent.putExtra(BUNDLE_PACKAGE, packageName)
         context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         onConnection?.let {
-            addConsumer(object : KarooSystemListener("onConnection") {
-                override fun register(controller: IKarooSystem?) {
-                    onConnection(controller != null)
-                }
+            addConsumer(
+                object : KarooSystemListener("onConnection") {
+                    override fun register(controller: IKarooSystem?) {
+                        onConnection(controller != null)
+                    }
 
-                override fun unregister(controller: IKarooSystem?) {
-                }
-            })
+                    override fun unregister(controller: IKarooSystem?) {
+                    }
+                },
+            )
         }
     }
 
@@ -205,15 +207,17 @@ class KarooSystemService(private val context: Context) {
             removeConsumer(consumerId)
         }
         val consumer = createConsumer<T>(onEvent, onErrorWrapper, onCompleteWrapper)
-        return addConsumer(object : KarooSystemListener(consumerId) {
-            override fun register(controller: IKarooSystem?) {
-                controller?.addEventConsumer(id, params.bundleWithSerializable(packageName), consumer)
-            }
+        return addConsumer(
+            object : KarooSystemListener(consumerId) {
+                override fun register(controller: IKarooSystem?) {
+                    controller?.addEventConsumer(id, params.bundleWithSerializable(packageName), consumer)
+                }
 
-            override fun unregister(controller: IKarooSystem?) {
-                controller?.removeEventConsumer(id)
-            }
-        })
+                override fun unregister(controller: IKarooSystem?) {
+                    controller?.removeEventConsumer(id)
+                }
+            },
+        )
     }
 
     /**

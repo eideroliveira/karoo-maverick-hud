@@ -41,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Base class for implementation of Karoo Extension.
  *
- * @sample [karooExtensionUsage]
+ * @sample [io.hammerhead.karooext.karooExtensionUsage]
  */
 abstract class KarooExtension(
     /**

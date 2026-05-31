@@ -11,12 +11,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
@@ -32,6 +30,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var karoo: KarooSystemService
     private lateinit var maverick: MaverickBridge
     private lateinit var rideStateFlow: StateFlow<RideState>
+
+    // Tappable in-ride field that shows link status and opens pairing. Reads the
+    // process-wide GlassesLinkState, so it needs no reference to [maverick].
+    override val types by lazy { listOf(GlassesDataType(extension)) }
 
     override fun onCreate() {
         super.onCreate()
@@ -95,7 +97,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .stateIn(scope, SharingStarted.Eagerly, HudConfig.DEFAULT)
 
         configFlow.flatMapLatest { cfg: HudConfig ->
-            val perField = HudFieldId.values().map { field ->
+            val perField = HudFieldId.entries.map { field ->
                 karoo.streamDataFlow(field.dataTypeId).onEach {
                     // tagging keeps the merge cheap and avoids `combine` recompute storms
                 }.let { stream ->
@@ -105,7 +107,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             merge(*perField.toTypedArray())
-                .scan(emptyMap<HudFieldId, com.eider.karoomaverickhud.extension.HudCell>()) { acc, (field, state) ->
+                .scan(emptyMap<HudFieldId, HudCell>()) { acc, (field, state) ->
                     acc + (field to FieldFormat.format(field, state, cfg.imperial))
                 }
                 .sample(cfg.refreshIntervalMs)
@@ -134,7 +136,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             maverick.connectionState.collect { connected ->
                 // Only nudge on an *unexpected* drop mid-ride — the ride-end disconnect
                 // is intentional and Idle by the time it lands, so it stays silent.
-                if (lastConnected && !connected && rideStateFlow.value !is RideState.Idle) {
+                if (lastConnected && !connected && (rideStateFlow.value !is RideState.Idle)) {
                     karoo.dispatch(
                         InRideAlert(
                             id = "maverick-disconnected",

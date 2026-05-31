@@ -33,9 +33,10 @@ import io.hammerhead.karooext.models.ViewEvent
  * If [RemoteViews] are being updated in `startView`, [DataType.graphical] should be true.
  *
  * @see [KarooExtension.types]
- * @sample [dataTypeImplUsage]
- * @sample [visualDataTypeImplUsage]
+ * @sample [io.hammerhead.karooext.dataTypeImplUsage]
+ * @sample [io.hammerhead.karooext.visualDataTypeImplUsage]
  */
+@Suppress("unused")
 abstract class DataTypeImpl(
     val extension: String,
     val typeId: String,

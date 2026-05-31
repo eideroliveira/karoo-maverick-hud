@@ -94,7 +94,7 @@ object FieldFormat {
     }
 
     private fun formatDuration(seconds: Double?): String {
-        if (seconds == null || seconds < 0) return "--:--"
+        if ((seconds == null) || (seconds < 0)) return "--:--"
         val s = seconds.toLong()
         val h = s / 3600
         val m = (s % 3600) / 60
