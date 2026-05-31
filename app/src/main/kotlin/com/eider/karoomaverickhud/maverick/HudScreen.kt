@@ -7,36 +7,49 @@ import UIKit.app.data.Align
 import UIKit.app.data.EvsColor
 import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
+import UIKit.app.resources.ImgSrc
+import UIKit.widgets.Image
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
 import com.eider.karoomaverickhud.extension.HudCell
+import com.eider.karoomaverickhud.extension.HudColor
+import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.HudSnapshot
 
 /**
- * A 2×2 HUD rendered on a 420×150 Maverick screen. The page contents are dynamic — a
- * page is just a list of up to four [HudCell]s, supplied per snapshot — so the same
- * screen serves the user's custom pages and the mirrored Karoo page.
- *
- * The screen owns 12 [Text] widgets (4 cells × 3 elements: label, value, units) plus a
- * tiny status indicator. `onUpdateUI` pulls the current [HudSnapshot] off a volatile
- * field and rewrites only the strings — no widgets are added or removed across pages, so
- * the layout never reflows. Temple-pad touches are forwarded to [onTouch] for MANUAL mode.
+ * HUD on a 420×150 Maverick screen. Data lives in the two edge columns (far left / far
+ * right) so the centre stays a clear field of vision, with up to three rows each — six
+ * cells. Each cell is a small green icon + a zone-coloured value + its unit; no labels.
+ * Temple-pad touches go to [onTouch] for MANUAL page switching.
  */
 class HudScreen : Screen(420f, 150f) {
 
-    // 2×2 grid: column centers at x=105 / x=315; row centers at y≈45 / y≈110
-    private data class Slot(val cx: Float, val labelY: Float, val valueY: Float, val unitsY: Float)
-    private val slots = arrayOf(
-        Slot(cx = 105f, labelY = 18f, valueY = 48f, unitsY = 70f),
-        Slot(cx = 315f, labelY = 18f, valueY = 48f, unitsY = 70f),
-        Slot(cx = 105f, labelY = 82f, valueY = 112f, unitsY = 134f),
-        Slot(cx = 315f, labelY = 82f, valueY = 112f, unitsY = 134f),
-    )
+    private data class Pos(val iconX: Float, val valueX: Float, val unitX: Float, val y: Float)
 
-    private val labels = Array(4) { Text() }
-    private val values = Array(4) { Text() }
-    private val units = Array(4) { Text() }
+    // Left column (rows 0-2) then right column (rows 3-5). Centre x≈108..312 stays clear.
+    private val positions = arrayOf(
+        Pos(iconX = 4f, valueX = 30f, unitX = 70f, y = 30f),
+        Pos(iconX = 4f, valueX = 30f, unitX = 70f, y = 74f),
+        Pos(iconX = 4f, valueX = 30f, unitX = 70f, y = 118f),
+        Pos(iconX = 314f, valueX = 340f, unitX = 380f, y = 30f),
+        Pos(iconX = 314f, valueX = 340f, unitX = 380f, y = 74f),
+        Pos(iconX = 314f, valueX = 340f, unitX = 380f, y = 118f),
+    )
+    private val cellCount = positions.size
+
+    private val icons = Array(cellCount) { Image() }
+    private val values = Array(cellCount) { Text() }
+    private val units = Array(cellCount) { Text() }
+    private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
+
+    // One ImgSrc per glyph (each gets its own glasses image slot).
+    private val imgPower = ImgSrc("ic_power.png", ImgSrc.Slot.s1)
+    private val imgSpeed = ImgSrc("ic_speed.png", ImgSrc.Slot.s2)
+    private val imgHeart = ImgSrc("ic_hr.png", ImgSrc.Slot.s3)
+    private val imgCadence = ImgSrc("ic_cadence.png", ImgSrc.Slot.s4)
+
+    private val currentIcon = arrayOfNulls<HudIcon>(cellCount) // avoid redundant setResource
 
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
@@ -47,33 +60,27 @@ class HudScreen : Screen(420f, 150f) {
         snapshot = next
     }
 
-    /** Builder-style sugar over [Screen.add] so widget setup reads as a single chain. */
     private fun UIElement.addTo(screen: Screen): UIElement = also { screen.add(it) }
 
     override fun onCreate() {
-        for (i in 0..3) {
-            val s = slots[i]
-            labels[i]
+        for (i in 0 until cellCount) {
+            val p = positions[i]
+            icons[i]
+                .setXY(p.iconX, p.y - 6f)
+                .setVisibility(false)
+                .addTo(this)
+            values[i]
                 .setText("")
                 .setResource(Font.StockFont.Small)
-                .setTextAlign(Align.center)
-                .setXY(s.cx, s.labelY)
+                .setTextAlign(Align.left)
+                .setXY(p.valueX, p.y)
                 .setForegroundColor(EvsColor.Green.rgba)
                 .addTo(this)
-
-            values[i]
-                .setText("--")
-                .setResource(Font.StockFont.Large)
-                .setTextAlign(Align.center)
-                .setXY(s.cx, s.valueY)
-                .setForegroundColor(EvsColor.Green.rgba)
-                .addTo(this)
-
             units[i]
                 .setText("")
                 .setResource(Font.StockFont.Small)
-                .setTextAlign(Align.center)
-                .setXY(s.cx, s.unitsY)
+                .setTextAlign(Align.left)
+                .setXY(p.unitX, p.y)
                 .setForegroundColor(EvsColor.Green.rgba)
                 .addTo(this)
         }
@@ -85,24 +92,65 @@ class HudScreen : Screen(420f, 150f) {
             .setXY(getWidth() / 2f, 4f)
             .setForegroundColor(EvsColor.Green.rgba)
             .addTo(this)
+
+        statusText
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(getWidth() / 2f, getHeight() / 2f)
+            .setForegroundColor(EvsColor.Green.rgba)
+            .addTo(this)
     }
 
     override fun onUpdateUI(timestampMs: Long) {
         val snap = snapshot
-        val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
-        for (i in 0..3) {
-            val cell = page.getOrNull(i)
-            labels[i].setText(cell?.label.orEmpty())
-            values[i].setText(cell?.value ?: "")
-            units[i].setText(cell?.units.orEmpty())
+
+        // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
+        if (!snap.recording && !snap.paused) {
+            for (i in 0 until cellCount) {
+                values[i].setText("")
+                units[i].setText("")
+                setIcon(i, null)
+            }
+            statusText.setText("WAITING FOR RIDE")
+            pauseDot.setText("KAROO CONNECTED")
+            return
         }
-        pauseDot.setText(
-            when {
-                snap.paused -> "‖ PAUSED"
-                !snap.recording -> "○ IDLE"
-                else -> ""
-            },
-        )
+
+        statusText.setText("")
+        val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
+        for (i in 0 until cellCount) {
+            val cell = page.getOrNull(i)
+            values[i].setText(cell?.value ?: "")
+            values[i].setForegroundColor(colorRgba(cell?.color ?: HudColor.GREEN))
+            units[i].setText(cell?.units.orEmpty())
+            setIcon(i, cell?.icon)
+        }
+        pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
+    }
+
+    private fun setIcon(i: Int, icon: HudIcon?) {
+        if (currentIcon[i] == icon) return
+        currentIcon[i] = icon
+        if (icon == null) {
+            icons[i].setVisibility(false)
+        } else {
+            icons[i].setResource(imgSrcFor(icon))
+            icons[i].setVisibility(true)
+        }
+    }
+
+    private fun imgSrcFor(icon: HudIcon): ImgSrc = when (icon) {
+        HudIcon.POWER -> imgPower
+        HudIcon.SPEED -> imgSpeed
+        HudIcon.HEART -> imgHeart
+        HudIcon.CADENCE -> imgCadence
+    }
+
+    private fun colorRgba(color: HudColor): Int = when (color) {
+        HudColor.GREEN -> EvsColor.Green.rgba
+        HudColor.ORANGE -> EvsColor.Orange.rgba
+        HudColor.RED -> EvsColor.Red.rgba
     }
 
     override fun onTouch(touch: TouchDirection) {

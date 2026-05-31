@@ -2,7 +2,6 @@ package com.eider.karoomaverickhud.maverick
 
 import UIKit.app.data.TouchDirection
 import android.content.Context
-import android.os.SystemClock
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.HudPreferences
@@ -59,12 +58,13 @@ class MaverickBridge(
     private var connectionJob: Job? = null
 
     /**
-     * Start always-on, ride-independent work (page cycling). The glasses link is
-     * opened on [onRideStart] and closed on [onRideEnd] — we don't hold a BLE link
-     * outside a ride.
+     * Start the extension's glasses work: auto-connect to the paired Maverick and hold the
+     * link (reconnecting on drops), plus page cycling. The HUD itself shows whether a ride
+     * is active; the link is no longer ride-gated. Released in [shutdown].
      */
     fun start() {
         hudScreen.onTouchPad = ::handleTouch
+        startConnectionLoop()
         startPageCycler()
     }
 
@@ -97,57 +97,30 @@ class MaverickBridge(
     }
 
     /**
-     * Open the glasses link for a ride. Polls the SDK and retries [ensureConnected]
-     * until the link is up. If it never connects within [CONNECT_TIMEOUT_MS] we give
-     * up for this ride; once connected the loop stays alive to recover dropouts.
+     * Keep the paired glasses connected. Polls the SDK link state, mirrors it for the UI,
+     * and re-issues a secured connect whenever the device is paired but not connected (and
+     * not already connecting). Runs for the extension's whole lifetime.
      */
-    fun onRideStart() {
-        if (connectionJob?.isActive == true) return
-        if (configState.value.maverickDeviceId == null) {
-            Timber.i("Ride started but no Maverick paired; not connecting")
-            return
-        }
+    private fun startConnectionLoop() {
         connectionJob = scope.launch {
-            Timber.i("Ride started; connecting to Maverick (give up after ${CONNECT_TIMEOUT_MS / 1000}s)")
-            val deadline = SystemClock.elapsedRealtime() + CONNECT_TIMEOUT_MS
-            var everConnected = false
             while (isActive) {
-                val connected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(defaultValue = false)
-                if (connected != _connectionState.value) {
-                    _connectionState.value = connected
-                    GlassesLinkState.connected.value = connected
-                    if (!connected) screenMounted = false
-                }
-                when {
-                    connected -> everConnected = true
-                    (!everConnected) && (SystemClock.elapsedRealtime() >= deadline) -> {
-                        Timber.w("Maverick connect timed out after ${CONNECT_TIMEOUT_MS / 1000}s; giving up for this ride")
-                        return@launch
+                runCatching {
+                    val comm = Evs.instance().comm()
+                    val connected = comm.isConnected()
+                    if (connected != _connectionState.value) {
+                        _connectionState.value = connected
+                        GlassesLinkState.connected.value = connected
+                        if (!connected) screenMounted = false
                     }
-                    else -> ensureConnected()
-                }
+                    val paired = configState.value.maverickDeviceId != null
+                    if (paired && !connected && !comm.isConnecting() && comm.hasConfiguredDevice()) {
+                        Timber.i("Auto-connecting to Maverick")
+                        comm.connectSecured()
+                    }
+                }.onFailure { Timber.w(it, "connection loop error") }
                 delay(POLL_INTERVAL_MS)
             }
         }
-    }
-
-    /** Close the glasses link and stop retrying. Called when the ride ends. */
-    fun onRideEnd() {
-        connectionJob?.cancel()
-        connectionJob = null
-        screenMounted = false
-        if (_connectionState.value) _connectionState.value = false
-        GlassesLinkState.connected.value = false
-        runCatching { Evs.instance().comm().disconnect() }
-            .onFailure { Timber.w(it, "Evs disconnect on ride end failed") }
-    }
-
-    private fun ensureConnected() {
-        runCatching {
-            val comm = Evs.instance().comm()
-            if (comm.isConnected()) return
-            if (comm.hasConfiguredDevice()) comm.connect()
-        }.onFailure { Timber.w(it, "Evs reconnect failed") }
     }
 
     @OptIn(ExperimentalUnsignedTypes::class) // screens().addScreen touches a UInt screen id
@@ -156,8 +129,11 @@ class MaverickBridge(
         runCatching {
             if (!Evs.instance().comm().isConnected()) return
             Evs.instance().screens().addScreen(hudScreen)
+            // The glasses display is off by default — without this the screen mounts but
+            // nothing is shown.
+            Evs.instance().display().turnDisplayOn()
             screenMounted = true
-            Timber.i("HudScreen mounted")
+            Timber.i("HudScreen mounted; display on=${runCatching { Evs.instance().display().isDisplayOn() }.getOrNull()}")
         }.onFailure { Timber.w(it, "Failed to mount HudScreen") }
     }
 
@@ -178,8 +154,6 @@ class MaverickBridge(
     }
 
     companion object {
-        /** Give up establishing the glasses link this long after a ride starts. */
-        private const val CONNECT_TIMEOUT_MS = 5 * 60 * 1000L
         private const val POLL_INTERVAL_MS = 2_000L
     }
 }

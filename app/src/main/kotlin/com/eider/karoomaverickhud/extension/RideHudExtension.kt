@@ -58,7 +58,6 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         maverick.start()
 
-        startRideLifecycle()
         startPipeline()
         startMaverickHealthMonitor()
     }
@@ -87,32 +86,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     /**
-     * One pipeline per running ride. Re-subscribes when the user changes field
-     * selections in settings. The Karoo's native sensor cadence is ~1 Hz, so we
-     * sample at 1000 ms — under-pulling vs over-pulling for BLE stability.
+     * Streams the selected fields into HUD snapshots. The Karoo's native sensor cadence is
+     * ~1 Hz, so we sample at 1000 ms. Ride state rides along in each snapshot so the glasses
+     * show "waiting for ride" when idle and the HUD when recording.
      */
-    /**
-     * Drive the glasses link off ride state: open it when recording begins, close it
-     * when the ride returns to Idle. The bridge owns the connect-with-timeout, so we
-     * just signal the start/end transitions here.
-     */
-    private fun startRideLifecycle() {
-        scope.launch {
-            var active = false
-            rideStateFlow.collect { state ->
-                val nowActive = state !is RideState.Idle
-                if (nowActive && !active) {
-                    Timber.i("Ride started -> opening Maverick link")
-                    maverick.onRideStart()
-                } else if (!nowActive && active) {
-                    Timber.i("Ride ended -> closing Maverick link")
-                    maverick.onRideEnd()
-                }
-                active = nowActive
-            }
-        }
-    }
-
     @Suppress("OPT_IN_USAGE")
     private fun startPipeline() {
         val configFlow = HudPreferences.flow(applicationContext)

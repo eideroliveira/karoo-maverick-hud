@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- EvsKit authenticates the secured link by generating a certificate from the
+         Everysight server using sdk.key; without INTERNET the handshake fails and the
+         glasses drop the connection right after connecting. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- EvsKit scans with a location-based model (it checks isGpsEnabled), so we do NOT
          set neverForLocation here — that flag makes the scan return no devices. -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:targetApi="s" />

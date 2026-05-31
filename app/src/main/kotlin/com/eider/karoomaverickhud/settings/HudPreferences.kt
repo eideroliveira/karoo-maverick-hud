@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -28,6 +29,10 @@ data class HudConfig(
      * Used by AUTO/MANUAL modes; FOLLOW_KAROO ignores these and mirrors the Karoo page.
      */
     val pages: List<List<String>>,
+    /** Training-zone thresholds for value coloring (0 disables that field's coloring). */
+    val ftp: Int,
+    val maxHr: Int,
+    val idealCadence: Int,
 ) {
     companion object {
         /** Seeded layout matching the original hard-coded two-page HUD. */
@@ -44,6 +49,9 @@ data class HudConfig(
             pageMode = PageMode.AUTO,
             autoCycleMs = 5_000L,
             pages = DEFAULT_PAGES,
+            ftp = 200,
+            maxHr = 185,
+            idealCadence = 90,
         )
     }
 }
@@ -58,6 +66,9 @@ object HudPreferences {
     private val KEY_PAGE_MODE = stringPreferencesKey("page_mode")
     private val KEY_AUTO_CYCLE_MS = longPreferencesKey("auto_cycle_ms")
     private val KEY_PAGES = stringPreferencesKey("pages_json")
+    private val KEY_FTP = intPreferencesKey("ftp")
+    private val KEY_MAX_HR = intPreferencesKey("max_hr")
+    private val KEY_IDEAL_CADENCE = intPreferencesKey("ideal_cadence")
 
     fun flow(context: Context): Flow<HudConfig> = context.dataStore.data.map { prefs ->
         HudConfig(
@@ -69,7 +80,18 @@ object HudPreferences {
                 ?: HudConfig.DEFAULT.pageMode,
             autoCycleMs = prefs[KEY_AUTO_CYCLE_MS] ?: HudConfig.DEFAULT.autoCycleMs,
             pages = prefs[KEY_PAGES]?.let { decodePages(it) } ?: HudConfig.DEFAULT_PAGES,
+            ftp = prefs[KEY_FTP] ?: HudConfig.DEFAULT.ftp,
+            maxHr = prefs[KEY_MAX_HR] ?: HudConfig.DEFAULT.maxHr,
+            idealCadence = prefs[KEY_IDEAL_CADENCE] ?: HudConfig.DEFAULT.idealCadence,
         )
+    }
+
+    suspend fun setZones(context: Context, ftp: Int, maxHr: Int, idealCadence: Int) {
+        context.dataStore.edit {
+            it[KEY_FTP] = ftp
+            it[KEY_MAX_HR] = maxHr
+            it[KEY_IDEAL_CADENCE] = idealCadence
+        }
     }
 
     suspend fun setPairedDevice(context: Context, id: String?, name: String?) {

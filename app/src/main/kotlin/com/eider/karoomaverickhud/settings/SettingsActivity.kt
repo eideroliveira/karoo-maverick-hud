@@ -92,17 +92,13 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
     // without it, and the Karoo only powers GPS during a ride.
     var gpsBlocked by remember { mutableStateOf(value = false) }
 
-    // Launch the EvsKit scan/pair UI (EvsGlassesScanActivity). On return the SDK has
-    // persisted the chosen device; we mirror it into our prefs from onResume below.
-    val launchPairing = {
-        val started = runCatching { Evs.instance().showUI("pair") }
-            .getOrElse { Timber.w(it, "showUI(pair) failed"); false }
-        Timber.i("showUI(pair) returned $started")
-    }
+    // Our own pairing dialog (scan + tap to connect). Replaces the SDK's scan screen,
+    // whose device list doesn't render on the Karoo.
+    var showPairDialog by remember { mutableStateOf(false) }
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
-        if (result.values.all { it }) launchPairing() else Timber.w("BLE permissions denied: $result")
+        if (result.values.all { it }) showPairDialog = true else Timber.w("BLE permissions denied: $result")
     }
 
     // Single entry point for "pair": guard on Location, then request BLE permissions, then scan.
@@ -115,8 +111,18 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
             val needed = blePermissions().filter {
                 ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
             }
-            if (needed.isEmpty()) launchPairing() else permLauncher.launch(needed.toTypedArray())
+            if (needed.isEmpty()) showPairDialog = true else permLauncher.launch(needed.toTypedArray())
         }
+    }
+
+    if (showPairDialog) {
+        MaverickPairDialog(
+            onDismiss = { showPairDialog = false },
+            onPaired = { address, name ->
+                scope.launch { HudPreferences.setPairedDevice(ctx, address, name) }
+                showPairDialog = false
+            },
+        )
     }
 
     // Entered from the ride data field: kick off pairing automatically (GPS is on in a ride).
