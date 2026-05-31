@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ExtensionInfo
+    id="maverick_hud"
+    displayName="@string/app_name"
+    icon="@drawable/ic_hud"
+    scansDevices="false"
+    mapLayer="false"
+    fitFile="false" />
