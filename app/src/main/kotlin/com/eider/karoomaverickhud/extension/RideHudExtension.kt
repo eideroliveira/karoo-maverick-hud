@@ -1,9 +1,11 @@
 package com.eider.karoomaverickhud.extension
 
+import android.content.Intent
 import com.eider.karoomaverickhud.maverick.MaverickBridge
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.PageMode
+import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.models.ActiveRidePage
@@ -59,6 +61,21 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         startRideLifecycle()
         startPipeline()
         startMaverickHealthMonitor()
+    }
+
+    /**
+     * Ride-menu actions. "pair" opens the app straight into the pair flow — a reliable
+     * in-ride trigger (GPS is on during a ride, which the BLE scan needs) that, unlike a
+     * data-field tap, the Karoo guarantees to deliver.
+     */
+    override fun onBonusAction(actionId: String) {
+        Timber.i("onBonusAction $actionId")
+        if (actionId == "pair") {
+            val intent = Intent(this, SettingsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
+            startActivity(intent)
+        }
     }
 
     override fun onDestroy() {

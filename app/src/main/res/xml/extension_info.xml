@@ -12,4 +12,7 @@
         graphical="true"
         icon="@drawable/ic_hud"
         typeId="glasses" />
+    <BonusAction
+        displayName="@string/pair_action"
+        actionId="pair" />
 </ExtensionInfo>
