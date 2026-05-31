@@ -33,8 +33,7 @@
 
         <service
             android:name=".extension.RideHudExtension"
-            android:exported="true"
-            android:foregroundServiceType="dataSync|connectedDevice"
+            android:exported="true" android:foregroundServiceType="dataSync|connectedDevice"
             tools:ignore="ExportedService">
             <intent-filter>
                 <action android:name="io.hammerhead.karooext.KAROO_EXTENSION" />
