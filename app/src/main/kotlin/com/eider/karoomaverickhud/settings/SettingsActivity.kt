@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -26,6 +29,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -42,6 +46,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import com.eider.karoomaverickhud.extension.FieldFormat
+import com.eider.karoomaverickhud.extension.HudFieldId
+import com.eider.karoomaverickhud.extension.MAX_CELLS
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -213,8 +220,89 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
                 )
             }
         }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Custom pages", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Used by Auto-cycle and Manual modes. Follow-Karoo ignores these and mirrors " +
+                "the Karoo's active page.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        PagesEditor(
+            pages = cfg.pages,
+            onChange = { next -> scope.launch { HudPreferences.setPages(ctx, next) } },
+        )
     }
 }
+
+/** Add/remove glasses pages and the fields on each (max [MAX_CELLS] fields per page). */
+@Composable
+private fun PagesEditor(pages: List<List<String>>, onChange: (List<List<String>>) -> Unit) {
+    var addFieldForPage by remember { mutableStateOf(-1) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        pages.forEachIndexed { pageIndex, page ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Page ${pageIndex + 1}", style = MaterialTheme.typography.titleSmall)
+                TextButton(onClick = {
+                    onChange(pages.filterIndexed { i, _ -> i != pageIndex })
+                }) { Text("Remove") }
+            }
+
+            page.forEachIndexed { fieldIndex, dtid ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("• ${FieldFormat.labelFor(dtid)}")
+                    TextButton(onClick = {
+                        onChange(
+                            pages.mapIndexed { i, p ->
+                                if (i == pageIndex) p.filterIndexed { j, _ -> j != fieldIndex } else p
+                            },
+                        )
+                    }) { Text("✕") }
+                }
+            }
+
+            if (page.size < MAX_CELLS) {
+                Box {
+                    TextButton(onClick = { addFieldForPage = pageIndex }) { Text("+ Add field") }
+                    DropdownMenu(
+                        expanded = addFieldForPage == pageIndex,
+                        onDismissRequest = { addFieldForPage = -1 },
+                    ) {
+                        HudFieldId.entries.forEach { field ->
+                            DropdownMenuItem(
+                                text = { Text(field.label) },
+                                onClick = {
+                                    addFieldForPage = -1
+                                    onChange(
+                                        pages.mapIndexed { i, p ->
+                                            if (i == pageIndex) p + field.dataTypeId else p
+                                        },
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (pages.size < MAX_PAGES) {
+            TextButton(onClick = { onChange(pages + listOf(emptyList<String>())) }) { Text("+ Add page") }
+        }
+    }
+}
+
+private const val MAX_PAGES = 5
 
 /**
  * Runtime permissions a BLE scan needs. On Android 12+ scanning uses BLUETOOTH_SCAN /

@@ -3,8 +3,10 @@ package com.eider.karoomaverickhud.extension
 import com.eider.karoomaverickhud.maverick.MaverickBridge
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
+import com.eider.karoomaverickhud.settings.PageMode
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
+import io.hammerhead.karooext.models.ActiveRidePage
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
 import kotlinx.coroutines.CoroutineScope
@@ -14,8 +16,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.sample
@@ -96,33 +101,45 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val configFlow = HudPreferences.flow(applicationContext)
             .stateIn(scope, SharingStarted.Eagerly, HudConfig.DEFAULT)
 
-        configFlow.flatMapLatest { cfg: HudConfig ->
-            val perField = HudFieldId.entries.map { field ->
-                karoo.streamDataFlow(field.dataTypeId).onEach {
-                    // tagging keeps the merge cheap and avoids `combine` recompute storms
-                }.let { stream ->
-                    kotlinx.coroutines.flow.flow {
-                        stream.collect { emit(field to it) }
+        // Only consumed in FOLLOW_KAROO mode, but shared cheaply via stateIn.
+        val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
+        // The fields to render, as pages of data-type ids. FOLLOW_KAROO mirrors the
+        // active Karoo page's top fields; AUTO/MANUAL use the user's custom pages.
+        val layoutFlow = configFlow.combine(activePageFlow) { cfg, active ->
+            if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
+                val fields = active?.page?.elements?.map { it.dataTypeId }?.take(MAX_CELLS).orEmpty()
+                if (fields.isEmpty()) emptyList() else listOf(fields)
+            } else {
+                cfg.pages.map { it.take(MAX_CELLS) }.filter { it.isNotEmpty() }
+            }
+        }.distinctUntilChanged()
+
+        layoutFlow.flatMapLatest { layout ->
+            val ids = layout.flatten().distinct()
+            val cellsFlow = if (ids.isEmpty()) {
+                flowOf(emptyMap())
+            } else {
+                val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
+                merge(*streams.toTypedArray())
+                    .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
+                        acc + (id to FieldFormat.format(id, state, configFlow.value.imperial))
                     }
-                }
             }
-            merge(*perField.toTypedArray())
-                .scan(emptyMap<HudFieldId, HudCell>()) { acc, (field, state) ->
-                    acc + (field to FieldFormat.format(field, state, cfg.imperial))
-                }
-                .sample(cfg.refreshIntervalMs)
-                .combine(rideStateFlow) { cells, ride ->
-                    HudSnapshot(
-                        cells = cells,
-                        paused = ride is RideState.Paused,
-                        recording = ride is RideState.Recording,
-                        pageIndex = 0,
-                    )
-                }
+            cellsFlow.map { cells -> layout to cells }
         }
-            .onEach { snapshot ->
-                maverick.update(snapshot)
+            .sample(configFlow.value.refreshIntervalMs)
+            .combine(rideStateFlow) { (layout, cells), ride ->
+                val pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } }
+                HudSnapshot(
+                    pages = pages,
+                    paused = ride is RideState.Paused,
+                    recording = ride is RideState.Recording,
+                    pageIndex = 0,
+                )
             }
+            .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
     }
 

@@ -5,26 +5,22 @@ package com.eider.karoomaverickhud.maverick
 import UIKit.app.Screen
 import UIKit.app.data.Align
 import UIKit.app.data.EvsColor
+import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
 import com.eider.karoomaverickhud.extension.HudCell
-import com.eider.karoomaverickhud.extension.HudFieldId
 import com.eider.karoomaverickhud.extension.HudSnapshot
 
 /**
- * Two-page 2×2 HUD rendered on a 420×150 Maverick screen.
+ * A 2×2 HUD rendered on a 420×150 Maverick screen. The page contents are dynamic — a
+ * page is just a list of up to four [HudCell]s, supplied per snapshot — so the same
+ * screen serves the user's custom pages and the mirrored Karoo page.
  *
- *  Page 0 ─ Power | Cadence
- *           L/R   | Speed
- *
- *  Page 1 ─ Dist  | Avg Speed
- *           HR    | Time
- *
- * The screen owns 12 [Text] widgets (4 cells × 3 elements: label, value, units) plus
- * a tiny pause indicator. `onUpdateUI` pulls the current [HudSnapshot] off a
- * volatile field and rewrites only the strings that changed — no widgets are added
- * or removed across pages, so the layout never reflows.
+ * The screen owns 12 [Text] widgets (4 cells × 3 elements: label, value, units) plus a
+ * tiny status indicator. `onUpdateUI` pulls the current [HudSnapshot] off a volatile
+ * field and rewrites only the strings — no widgets are added or removed across pages, so
+ * the layout never reflows. Temple-pad touches are forwarded to [onTouch] for MANUAL mode.
  */
 class HudScreen : Screen(420f, 150f) {
 
@@ -42,12 +38,10 @@ class HudScreen : Screen(420f, 150f) {
     private val units = Array(4) { Text() }
     private val pauseDot = Text()
 
-    private val pages: Array<Array<HudFieldId>> = arrayOf(
-        arrayOf(HudFieldId.POWER, HudFieldId.CADENCE, HudFieldId.LR_BALANCE, HudFieldId.SPEED),
-        arrayOf(HudFieldId.DISTANCE, HudFieldId.AVG_SPEED, HudFieldId.HEART_RATE, HudFieldId.ELAPSED_TIME),
-    )
-
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
+
+    /** Set by [MaverickBridge] to handle temple-pad touches (MANUAL page switching). */
+    @Volatile var onTouchPad: ((TouchDirection) -> Unit)? = null
 
     fun apply(next: HudSnapshot) {
         snapshot = next
@@ -95,11 +89,11 @@ class HudScreen : Screen(420f, 150f) {
 
     override fun onUpdateUI(timestampMs: Long) {
         val snap = snapshot
-        val page = pages[snap.pageIndex.coerceIn(0, pages.lastIndex)]
+        val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
         for (i in 0..3) {
-            val cell: HudCell? = snap.cells[page[i]]
-            labels[i].setText(cell?.label.orEmpty().ifEmpty { page[i].label })
-            values[i].setText(cell?.value ?: "--")
+            val cell = page.getOrNull(i)
+            labels[i].setText(cell?.label.orEmpty())
+            values[i].setText(cell?.value ?: "")
             units[i].setText(cell?.units.orEmpty())
         }
         pauseDot.setText(
@@ -109,5 +103,9 @@ class HudScreen : Screen(420f, 150f) {
                 else -> ""
             },
         )
+    }
+
+    override fun onTouch(touch: TouchDirection) {
+        onTouchPad?.invoke(touch)
     }
 }

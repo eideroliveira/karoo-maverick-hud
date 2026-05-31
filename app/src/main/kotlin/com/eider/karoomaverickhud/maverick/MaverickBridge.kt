@@ -1,5 +1,6 @@
 package com.eider.karoomaverickhud.maverick
 
+import UIKit.app.data.TouchDirection
 import android.content.Context
 import android.os.SystemClock
 import com.eider.karoomaverickhud.extension.HudSnapshot
@@ -63,14 +64,29 @@ class MaverickBridge(
      * outside a ride.
      */
     fun start() {
+        hudScreen.onTouchPad = ::handleTouch
         startPageCycler()
     }
 
     fun update(snapshot: HudSnapshot) {
+        // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
+        if (snapshot.pages.isNotEmpty() && pageIndex >= snapshot.pages.size) pageIndex = 0
         val stamped = snapshot.copy(pageIndex = pageIndex)
         lastSnapshot = stamped
         hudScreen.apply(stamped)
         mountScreenIfNeeded()
+    }
+
+    /** MANUAL mode: a temple-pad touch flips the page. Ignored in AUTO/FOLLOW_KAROO. */
+    private fun handleTouch(direction: TouchDirection) {
+        if (configState.value.pageMode != PageMode.MANUAL) return
+        val count = lastSnapshot.pages.size
+        if (count <= 1) return
+        pageIndex = when (direction) {
+            TouchDirection.backward -> (pageIndex - 1 + count) % count
+            else -> (pageIndex + 1) % count // forward / tap / longTap -> next
+        }
+        hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
     }
 
     fun shutdown() {
@@ -151,8 +167,11 @@ class MaverickBridge(
                 val cfg = configState.value
                 delay(cfg.autoCycleMs.coerceAtLeast(1_000L))
                 if (configState.value.pageMode == PageMode.AUTO) {
-                    pageIndex = (pageIndex + 1) % 2
-                    hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
+                    val count = lastSnapshot.pages.size
+                    if (count > 1) {
+                        pageIndex = (pageIndex + 1) % count
+                        hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
+                    }
                 }
             }
         }

@@ -5,9 +5,14 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
 import kotlin.math.roundToInt
 
+/** Max cells the Maverick HUD shows per page (2×2 grid). */
+const val MAX_CELLS = 4
+
 /**
- * The eight ride values the HUD currently surfaces. Keep this list aligned with
- * [HudFieldId.dataTypeId] so adding a new field is a one-line change.
+ * The ride values the HUD has first-class formatting for (label + units + value rule).
+ * Anything else a Karoo page throws at us is still rendered, best-effort, by
+ * [FieldFormat.format] — these just look nicer. Keep [dataTypeId] aligned with
+ * [DataType.Type] so the field picker and the Karoo page mirror agree.
  */
 enum class HudFieldId(val dataTypeId: String, val label: String) {
     POWER(DataType.Type.POWER, "POWER"),
@@ -21,23 +26,63 @@ enum class HudFieldId(val dataTypeId: String, val label: String) {
 }
 
 /** Snapshot of one field at one instant — what the glasses render. */
-data class HudCell(val label: String, val value: String, val units: String)
+data class HudCell(val label: String, val value: String, val units: String) {
+    companion object {
+        fun blank(dataTypeId: String) = HudCell(FieldFormat.labelFor(dataTypeId), "--", "")
+    }
+}
 
-/** Last known value for every active field, plus ride state. */
+/**
+ * What the glasses render right now: one list of [HudCell] per page, plus the current
+ * page and ride state. Pages come either from the user's custom layout or from
+ * mirroring the Karoo's active page.
+ */
 data class HudSnapshot(
-    val cells: Map<HudFieldId, HudCell>,
+    val pages: List<List<HudCell>>,
     val paused: Boolean,
     val recording: Boolean,
     val pageIndex: Int,
 ) {
     companion object {
-        val empty = HudSnapshot(emptyMap(), paused = false, recording = false, pageIndex = 0)
+        val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0)
     }
 }
 
 object FieldFormat {
 
-    fun format(field: HudFieldId, state: StreamState, imperial: Boolean): HudCell {
+    private val knownByDataType = HudFieldId.entries.associateBy { it.dataTypeId }
+
+    /**
+     * Format any data type into a [HudCell]. Known fields get tailored label/units;
+     * unknown ones (other Karoo fields, extension fields) fall back to their raw
+     * single value and a label derived from the id.
+     */
+    fun format(dataTypeId: String, state: StreamState, imperial: Boolean): HudCell {
+        val known = knownByDataType[dataTypeId]
+        return if (known != null) formatKnown(known, state, imperial) else formatGeneric(dataTypeId, state)
+    }
+
+    /** Short header label for a data type id, used by generic cells and the field picker. */
+    fun labelFor(dataTypeId: String): String {
+        knownByDataType[dataTypeId]?.let { return it.label }
+        var s = dataTypeId
+        if (s.contains("::")) s = s.substringAfterLast("::") // extension fields: "ext::typeId"
+        s = s.removePrefix("TYPE_").removeSuffix("_ID").replace('_', ' ').trim()
+        return if (s.isEmpty()) "FIELD" else s.uppercase().take(8)
+    }
+
+    private fun formatGeneric(dataTypeId: String, state: StreamState): HudCell {
+        val raw = (state as? StreamState.Streaming)?.dataPoint
+        val v = raw?.singleValue
+        val value = when {
+            v == null -> "--"
+            v == v.roundToInt().toDouble() -> v.roundToInt().toString()
+            else -> "%.1f".format(v)
+        }
+        return HudCell(labelFor(dataTypeId), value, "")
+    }
+
+    private fun formatKnown(field: HudFieldId, state: StreamState, imperial: Boolean): HudCell {
         val raw = (state as? StreamState.Streaming)?.dataPoint
         return when (field) {
             HudFieldId.POWER ->
