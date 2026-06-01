@@ -3,13 +3,28 @@ package com.eider.karoomaverickhud.extension
 import io.hammerhead.karooext.models.DataPoint
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Max cells the HUD shows per page: two edge columns (left+right) × three rows. */
-const val MAX_CELLS = 6
+/** The HUD draws two edge columns (first & last of a notional four), so the centre stays clear. */
+const val COLUMNS = 2
 
-/** Value color, mapped to an EvsColor by the screen. Drives training-zone coloring. */
-enum class HudColor { GREEN, ORANGE, RED }
+/** Rows are user-selectable; the layout supports two or three. */
+const val MIN_ROWS = 2
+const val MAX_ROWS = 3
+
+/** Absolute cell cap (two columns × three rows) — used to size the screen's element pool. */
+const val MAX_CELLS = COLUMNS * MAX_ROWS
+
+/** Cells shown for a given row count, clamped to the supported range. */
+fun cellsForRows(rows: Int): Int = COLUMNS * rows.coerceIn(MIN_ROWS, MAX_ROWS)
+
+/**
+ * Value color, mapped to an EvsColor by the screen. Drives training-zone coloring on a
+ * white→green→orange→red→purple scale: Z1 endurance/leisure through Z5+ anaerobic. Non-training
+ * fields and missing data stay [WHITE] (neutral — the color only "lights up" for effort).
+ */
+enum class HudColor { WHITE, GREEN, ORANGE, RED, PURPLE }
 
 /** Small green glyph drawn next to a value, mapped to an asset by the screen. */
 enum class HudIcon { POWER, SPEED, HEART, CADENCE }
@@ -40,11 +55,11 @@ enum class HudFieldId(val dataTypeId: String, val label: String) {
 data class HudCell(
     val value: String,
     val units: String,
-    val color: HudColor = HudColor.GREEN,
+    val color: HudColor = HudColor.WHITE,
     val icon: HudIcon? = null,
 ) {
     companion object {
-        fun blank(dataTypeId: String) = HudCell("--", "", HudColor.GREEN, FieldFormat.iconFor(dataTypeId))
+        fun blank(dataTypeId: String) = HudCell("--", "", HudColor.WHITE, FieldFormat.iconFor(dataTypeId))
     }
 }
 
@@ -57,9 +72,11 @@ data class HudSnapshot(
     val paused: Boolean,
     val recording: Boolean,
     val pageIndex: Int,
+    /** Rows to lay out (2 or 3); drives the screen's vertical placement and active-cell count. */
+    val rows: Int = MAX_ROWS,
 ) {
     companion object {
-        val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0)
+        val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
     }
 }
 
@@ -125,56 +142,62 @@ object FieldFormat {
 
             HudFieldId.SPEED -> {
                 val mps = raw?.values?.get(DataType.Field.SPEED)
-                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.GREEN, HudIcon.SPEED)
+                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.WHITE, HudIcon.SPEED)
             }
 
             HudFieldId.AVG_SPEED -> {
                 val mps = raw?.values?.get(DataType.Field.AVERAGE_SPEED)
-                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.GREEN, HudIcon.SPEED)
+                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.WHITE, HudIcon.SPEED)
             }
 
-            HudFieldId.LR_BALANCE -> HudCell(formatBalance(raw), "%", HudColor.GREEN, null)
+            HudFieldId.LR_BALANCE -> HudCell(formatBalance(raw), "%", HudColor.WHITE, null)
 
             HudFieldId.DISTANCE -> {
                 val m = raw?.values?.get(DataType.Field.DISTANCE)
-                HudCell(formatDistance(m, imperial), if (imperial) "mi" else "km", HudColor.GREEN, null)
+                HudCell(formatDistance(m, imperial), if (imperial) "mi" else "km", HudColor.WHITE, null)
             }
 
             HudFieldId.ELAPSED_TIME -> {
                 val sec = raw?.values?.get(DataType.Field.ELAPSED_TIME)
-                HudCell(formatDuration(sec), "", HudColor.GREEN, null)
+                HudCell(formatDuration(sec), "", HudColor.WHITE, null)
             }
         }
     }
 
-    // Training zones: red at/above threshold, green at endurance or below, orange between.
+    // Power zones by %FTP: Z1 endurance/leisure (white) → Z5+ anaerobic (purple).
     private fun powerColor(watts: Double?, ftp: Int): HudColor {
-        if (watts == null || ftp <= 0) return HudColor.GREEN
+        if (watts == null || ftp <= 0) return HudColor.WHITE
         val pct = watts / ftp
         return when {
-            pct >= 0.95 -> HudColor.RED
-            pct >= 0.75 -> HudColor.ORANGE
-            else -> HudColor.GREEN
+            pct >= 1.20 -> HudColor.PURPLE  // Z5+ anaerobic
+            pct >= 1.06 -> HudColor.RED     // Z4 VO2max
+            pct >= 0.91 -> HudColor.ORANGE  // Z3 threshold
+            pct >= 0.76 -> HudColor.GREEN   // Z2 tempo
+            else -> HudColor.WHITE          // Z1 endurance/leisure
         }
     }
 
+    // HR zones by %MaxHR: Z1 (white) → Z5 (purple).
     private fun hrColor(bpm: Double?, maxHr: Int): HudColor {
-        if (bpm == null || maxHr <= 0) return HudColor.GREEN
+        if (bpm == null || maxHr <= 0) return HudColor.WHITE
         val pct = bpm / maxHr
         return when {
-            pct >= 0.90 -> HudColor.RED
-            pct >= 0.75 -> HudColor.ORANGE
-            else -> HudColor.GREEN
+            pct >= 0.90 -> HudColor.PURPLE  // Z5
+            pct >= 0.80 -> HudColor.RED     // Z4
+            pct >= 0.70 -> HudColor.ORANGE  // Z3
+            pct >= 0.60 -> HudColor.GREEN   // Z2
+            else -> HudColor.WHITE          // Z1
         }
     }
 
-    // Cadence is about holding a target: green at/above ideal, red well below (mashing).
+    // Cadence has no intensity scale — color by how far it drifts from ideal in either
+    // direction (grinding too low or spinning too high): green on-target, then orange, then red.
     private fun cadenceColor(rpm: Double?, ideal: Int): HudColor {
-        if (rpm == null || ideal <= 0) return HudColor.GREEN
-        return when {
-            rpm >= ideal - 5 -> HudColor.GREEN
-            rpm >= ideal - 20 -> HudColor.ORANGE
-            else -> HudColor.RED
+        if (rpm == null || ideal <= 0) return HudColor.WHITE
+        return when (abs(rpm - ideal)) {
+            in 0.0..5.0 -> HudColor.GREEN    // on target
+            in 5.0..15.0 -> HudColor.ORANGE  // drifting
+            else -> HudColor.RED             // well off target
         }
     }
 

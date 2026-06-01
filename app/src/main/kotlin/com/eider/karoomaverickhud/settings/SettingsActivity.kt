@@ -50,7 +50,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import com.eider.karoomaverickhud.extension.FieldFormat
 import com.eider.karoomaverickhud.extension.HudFieldId
-import com.eider.karoomaverickhud.extension.MAX_CELLS
+import com.eider.karoomaverickhud.extension.MAX_ROWS
+import com.eider.karoomaverickhud.extension.MIN_ROWS
+import com.eider.karoomaverickhud.extension.cellsForRows
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -207,6 +209,45 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
             )
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Rows per page")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                (MIN_ROWS..MAX_ROWS).forEach { r ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(
+                            selected = cfg.rows == r,
+                            onClick = { scope.launch { HudPreferences.setRows(ctx, r) } },
+                        )
+                        Text("$r")
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Training zones", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Used to color power, heart rate and cadence. White = easy (Z1), then green, " +
+                "orange, red, purple as effort rises. Set 0 to disable a field's coloring.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        NumberStepper(
+            label = "FTP (W)", value = cfg.ftp, step = 5, min = 0, max = 600,
+            onChange = { v -> scope.launch { HudPreferences.setZones(ctx, v, cfg.maxHr, cfg.idealCadence) } },
+        )
+        NumberStepper(
+            label = "Max HR (bpm)", value = cfg.maxHr, step = 1, min = 0, max = 230,
+            onChange = { v -> scope.launch { HudPreferences.setZones(ctx, cfg.ftp, v, cfg.idealCadence) } },
+        )
+        NumberStepper(
+            label = "Ideal cadence (rpm)", value = cfg.idealCadence, step = 1, min = 0, max = 130,
+            onChange = { v -> scope.launch { HudPreferences.setZones(ctx, cfg.ftp, cfg.maxHr, v) } },
+        )
+
         Spacer(Modifier.height(8.dp))
         Text("Page switching", style = MaterialTheme.typography.titleMedium)
 
@@ -239,14 +280,39 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
 
         PagesEditor(
             pages = cfg.pages,
+            maxFields = cellsForRows(cfg.rows),
             onChange = { next -> scope.launch { HudPreferences.setPages(ctx, next) } },
         )
     }
 }
 
-/** Add/remove glasses pages and the fields on each (max [MAX_CELLS] fields per page). */
+/** A label with −/＋ buttons and the current value; clamps to [min]..[max] by [step]. */
 @Composable
-private fun PagesEditor(pages: List<List<String>>, onChange: (List<List<String>>) -> Unit) {
+private fun NumberStepper(
+    label: String,
+    value: Int,
+    step: Int,
+    min: Int,
+    max: Int,
+    onChange: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { onChange((value - step).coerceIn(min, max)) }, enabled = value > min) { Text("−") }
+            Text("$value", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = { onChange((value + step).coerceIn(min, max)) }, enabled = value < max) { Text("＋") }
+        }
+    }
+}
+
+/** Add/remove glasses pages and the fields on each (max [maxFields] fields per page). */
+@Composable
+private fun PagesEditor(pages: List<List<String>>, maxFields: Int, onChange: (List<List<String>>) -> Unit) {
     var addFieldForPage by remember { mutableStateOf(-1) }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -279,7 +345,7 @@ private fun PagesEditor(pages: List<List<String>>, onChange: (List<List<String>>
                 }
             }
 
-            if (page.size < MAX_CELLS) {
+            if (page.size < maxFields) {
                 Box {
                     TextButton(onClick = { addFieldForPage = pageIndex }) { Text("+ Add field") }
                     DropdownMenu(

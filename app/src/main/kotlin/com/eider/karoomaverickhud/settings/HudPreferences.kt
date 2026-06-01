@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.eider.karoomaverickhud.extension.HudFieldId
+import com.eider.karoomaverickhud.extension.MAX_ROWS
+import com.eider.karoomaverickhud.extension.MIN_ROWS
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
@@ -25,10 +27,12 @@ data class HudConfig(
     val pageMode: PageMode,
     val autoCycleMs: Long,
     /**
-     * Custom glasses pages, each a list of Karoo data-type ids (max [com.eider.karoomaverickhud.extension.MAX_CELLS]).
+     * Custom glasses pages, each a list of Karoo data-type ids (capped to 2 × [rows] when rendered).
      * Used by AUTO/MANUAL modes; FOLLOW_KAROO ignores these and mirrors the Karoo page.
      */
     val pages: List<List<String>>,
+    /** Rows of fields per glasses column (2 or 3); each page holds 2 columns × this many. */
+    val rows: Int,
     /** Training-zone thresholds for value coloring (0 disables that field's coloring). */
     val ftp: Int,
     val maxHr: Int,
@@ -49,6 +53,7 @@ data class HudConfig(
             pageMode = PageMode.AUTO,
             autoCycleMs = 5_000L,
             pages = DEFAULT_PAGES,
+            rows = 3,
             ftp = 200,
             maxHr = 185,
             idealCadence = 90,
@@ -66,6 +71,7 @@ object HudPreferences {
     private val KEY_PAGE_MODE = stringPreferencesKey("page_mode")
     private val KEY_AUTO_CYCLE_MS = longPreferencesKey("auto_cycle_ms")
     private val KEY_PAGES = stringPreferencesKey("pages_json")
+    private val KEY_ROWS = intPreferencesKey("rows")
     private val KEY_FTP = intPreferencesKey("ftp")
     private val KEY_MAX_HR = intPreferencesKey("max_hr")
     private val KEY_IDEAL_CADENCE = intPreferencesKey("ideal_cadence")
@@ -80,10 +86,15 @@ object HudPreferences {
                 ?: HudConfig.DEFAULT.pageMode,
             autoCycleMs = prefs[KEY_AUTO_CYCLE_MS] ?: HudConfig.DEFAULT.autoCycleMs,
             pages = prefs[KEY_PAGES]?.let { decodePages(it) } ?: HudConfig.DEFAULT_PAGES,
+            rows = (prefs[KEY_ROWS] ?: HudConfig.DEFAULT.rows).coerceIn(MIN_ROWS, MAX_ROWS),
             ftp = prefs[KEY_FTP] ?: HudConfig.DEFAULT.ftp,
             maxHr = prefs[KEY_MAX_HR] ?: HudConfig.DEFAULT.maxHr,
             idealCadence = prefs[KEY_IDEAL_CADENCE] ?: HudConfig.DEFAULT.idealCadence,
         )
+    }
+
+    suspend fun setRows(context: Context, rows: Int) {
+        context.dataStore.edit { it[KEY_ROWS] = rows.coerceIn(MIN_ROWS, MAX_ROWS) }
     }
 
     suspend fun setZones(context: Context, ftp: Int, maxHr: Int, idealCadence: Int) {

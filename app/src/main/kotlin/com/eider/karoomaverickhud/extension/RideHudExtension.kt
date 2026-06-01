@@ -99,14 +99,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
-        // The fields to render, as pages of data-type ids. FOLLOW_KAROO mirrors the
-        // active Karoo page's top fields; AUTO/MANUAL use the user's custom pages.
+        // The fields to render, as pages of data-type ids, capped to the cells the chosen row
+        // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
+        // use the user's custom pages.
         val layoutFlow = configFlow.combine(activePageFlow) { cfg, active ->
+            val cap = cellsForRows(cfg.rows)
             if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
-                val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(MAX_CELLS)?.toList().orEmpty()
+                val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
                 if (fields.isEmpty()) emptyList() else listOf(fields)
             } else {
-                cfg.pages.map { it.take(MAX_CELLS) }.filter { it.isNotEmpty() }
+                cfg.pages.map { it.take(cap) }.filter { it.isNotEmpty() }
             }
         }.distinctUntilChanged()
 
@@ -118,7 +120,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
                 merge(*streams.toTypedArray())
                     .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
-                        acc + (id to FieldFormat.format(id, state, configFlow.value.imperial))
+                        val cfg = configFlow.value
+                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence)
+                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones))
                     }
             }
             cellsFlow.map { cells -> layout to cells }
@@ -131,6 +135,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
+                    rows = configFlow.value.rows,
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
