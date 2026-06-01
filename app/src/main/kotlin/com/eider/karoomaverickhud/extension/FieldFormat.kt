@@ -26,8 +26,8 @@ fun cellsForRows(rows: Int): Int = COLUMNS * rows.coerceIn(MIN_ROWS, MAX_ROWS)
  */
 enum class HudColor { WHITE, GREEN, ORANGE, RED, PURPLE }
 
-/** Small green glyph drawn next to a value, mapped to an asset by the screen. */
-enum class HudIcon { POWER, SPEED, HEART, CADENCE }
+/** Small glyph drawn next to a value, mapped to an asset by the screen. */
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE }
 
 /** Zone thresholds from the user's profile; 0 disables coloring for that field. */
 data class ZoneConfig(val ftp: Int, val maxHr: Int, val idealCadence: Int) {
@@ -94,6 +94,9 @@ object FieldFormat {
         DataType.Type.CADENCE -> HudIcon.CADENCE
         DataType.Type.HEART_RATE -> HudIcon.HEART
         DataType.Type.SPEED, DataType.Type.AVERAGE_SPEED -> HudIcon.SPEED
+        DataType.Type.ELAPSED_TIME -> HudIcon.TIME
+        DataType.Type.DISTANCE -> HudIcon.DISTANCE
+        DataType.Type.PEDAL_POWER_BALANCE -> HudIcon.BALANCE
         else -> null
     }
 
@@ -112,8 +115,13 @@ object FieldFormat {
      */
     fun format(dataTypeId: String, state: StreamState, imperial: Boolean, zones: ZoneConfig): HudCell {
         val known = knownByDataType[dataTypeId]
-        return if (known != null) formatKnown(known, state, imperial, zones) else formatGeneric(dataTypeId, state)
+        val cell = if (known != null) formatKnown(known, state, imperial, zones) else formatGeneric(dataTypeId, state)
+        // Average fields get an "avg" tag after the unit (e.g. "km/h avg", "W avg").
+        return if (isAverage(dataTypeId)) cell.copy(units = if (cell.units.isBlank()) "avg" else "${cell.units} avg") else cell
     }
+
+    private fun isAverage(dataTypeId: String): Boolean =
+        dataTypeId.contains("AVERAGE", ignoreCase = true) || dataTypeId.contains("AVG", ignoreCase = true)
 
     private fun formatGeneric(dataTypeId: String, state: StreamState): HudCell {
         val raw = (state as? StreamState.Streaming)?.dataPoint
@@ -154,16 +162,16 @@ object FieldFormat {
                 HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.WHITE, HudIcon.SPEED)
             }
 
-            HudFieldId.LR_BALANCE -> HudCell(formatBalance(raw), "%", HudColor.WHITE, null)
+            HudFieldId.LR_BALANCE -> HudCell(formatBalance(raw), "L/R %", HudColor.WHITE, HudIcon.BALANCE)
 
             HudFieldId.DISTANCE -> {
                 val m = raw?.values?.get(DataType.Field.DISTANCE)
-                HudCell(formatDistance(m, imperial), if (imperial) "mi" else "km", HudColor.WHITE, null)
+                HudCell(formatDistance(m, imperial), if (imperial) "mi" else "km", HudColor.WHITE, HudIcon.DISTANCE)
             }
 
             HudFieldId.ELAPSED_TIME -> {
                 val sec = raw?.values?.get(DataType.Field.ELAPSED_TIME)
-                HudCell(formatDuration(sec), "", HudColor.WHITE, null)
+                HudCell(formatDuration(sec), "", HudColor.WHITE, HudIcon.TIME)
             }
         }
     }

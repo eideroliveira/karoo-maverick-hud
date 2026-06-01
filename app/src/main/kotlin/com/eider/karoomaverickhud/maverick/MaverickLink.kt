@@ -41,6 +41,12 @@ object MaverickLink {
                 Timber.i("Evs onReady")
                 ready.value = true
                 lastError.value = null
+                // Make sure the display is actually on, and enable touch — without these the
+                // glasses can stay blank and temple-pad swipes never reach the HUD.
+                runCatching { Evs.instance().display().turnDisplayOn() }
+                    .onFailure { Timber.w(it, "turnDisplayOn failed") }
+                runCatching { Evs.instance().sensors().enableTouch(true) }
+                    .onFailure { Timber.w(it, "enableTouch failed") }
             }
 
             override fun onError(code: AppErrorCode, message: String) {

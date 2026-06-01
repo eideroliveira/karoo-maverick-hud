@@ -105,6 +105,25 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
         }
     }
 
+    // Glasses-control readouts (brightness, display state, screen offset). Read ONCE when the
+    // link comes up — polling these SDK getters every second destabilises the BLE sync and
+    // drops the glasses. Each control action updates the local state directly afterwards.
+    var displayOn by remember { mutableStateOf(true) }
+    var brightness by remember { mutableStateOf(0) }
+    var centerX by remember { mutableStateOf(0) }
+    var centerY by remember { mutableStateOf(0) }
+    LaunchedEffect(linkConnected) {
+        if (linkConnected) {
+            runCatching {
+                val evs = Evs.instance()
+                displayOn = evs.display().isDisplayOn()
+                brightness = evs.display().getBrightness().toInt()
+                centerX = evs.screens().getRenderingCenterX().toInt()
+                centerY = evs.screens().getRenderingCenterY().toInt()
+            }
+        }
+    }
+
     // Our own pairing dialog (scan + tap to connect). Replaces the SDK's scan screen,
     // whose device list doesn't render on the Karoo.
     var showPairDialog by remember { mutableStateOf(false) }
@@ -229,6 +248,59 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
             )
         }
 
+        // Glasses control — live device controls, only while the link is up (mirrors the
+        // Everysight GlassesControl sample: brightness, display on/off, screen IPD offset).
+        if (hasDevice && linkConnected) {
+            val setBrightness = { v: Int ->
+                val nv = v.coerceIn(0, 100)
+                runCatching { Evs.instance().display().setBrightness(nv.toShort()) }.onFailure { Timber.w(it, "brightness") }
+                brightness = nv
+            }
+            val setCenterX = { v: Int ->
+                runCatching { Evs.instance().screens().setRenderingCenterX(v.toFloat()) }.onFailure { Timber.w(it, "centerX") }
+                centerX = v
+            }
+            val setCenterY = { v: Int ->
+                runCatching { Evs.instance().screens().setRenderingCenterY(v.toFloat()) }.onFailure { Timber.w(it, "centerY") }
+                centerY = v
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text("Glasses control", style = MaterialTheme.typography.titleMedium)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("Display on")
+                Switch(
+                    checked = displayOn,
+                    onCheckedChange = { on ->
+                        runCatching {
+                            if (on) Evs.instance().display().turnDisplayOn() else Evs.instance().display().turnDisplayOff()
+                        }.onFailure { Timber.w(it, "toggle display") }
+                        displayOn = on
+                    },
+                )
+            }
+            ControlRow("Brightness", brightness, { setBrightness(brightness - 10) }, { setBrightness(brightness + 10) })
+            ControlRow("Screen X (IPD)", centerX, { setCenterX(centerX - 5) }, { setCenterX(centerX + 5) })
+            ControlRow("Screen Y", centerY, { setCenterY(centerY - 5) }, { setCenterY(centerY + 5) })
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(onClick = { runCatching { Evs.instance().showUI("configure") }.onFailure { Timber.w(it, "configure") } }) {
+                    Text("Configure")
+                }
+                OutlinedButton(onClick = { runCatching { Evs.instance().showUI("adjust") }.onFailure { Timber.w(it, "adjust") } }) {
+                    Text("Adjust")
+                }
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         Text("Display", style = MaterialTheme.typography.titleMedium)
 
@@ -341,6 +413,23 @@ private fun NumberStepper(
             OutlinedButton(onClick = { onChange((value - step).coerceIn(min, max)) }, enabled = value > min) { Text("−") }
             Text("$value", style = MaterialTheme.typography.titleMedium)
             OutlinedButton(onClick = { onChange((value + step).coerceIn(min, max)) }, enabled = value < max) { Text("＋") }
+        }
+    }
+}
+
+/** A label with −/＋ buttons and the current value; the callbacks apply the change to the SDK. */
+@Composable
+private fun ControlRow(label: String, value: Int, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onMinus) { Text("−") }
+            Text("$value", style = MaterialTheme.typography.titleMedium)
+            OutlinedButton(onClick = onPlus) { Text("＋") }
         }
     }
 }

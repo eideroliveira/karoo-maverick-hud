@@ -30,6 +30,15 @@ object GlassesLinkState {
 }
 
 /**
+ * The latest HUD snapshot being shown on the glasses, mirrored here so the in-ride Karoo data
+ * field ([com.eider.karoomaverickhud.extension.GlassesDataType]) can render the same values for
+ * on-device debugging without a reference to the [MaverickBridge] instance.
+ */
+object HudState {
+    val snapshot = MutableStateFlow(HudSnapshot.empty)
+}
+
+/**
  * Owns the Maverick connection lifecycle and the single mounted [HudScreen].
  *
  *  - SDK init/start happens in [com.eider.karoomaverickhud.KHudApplication].
@@ -58,6 +67,12 @@ class MaverickBridge(
     // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
     @Volatile private var glassesBattery: Int? = null
 
+    // Centre control-window state (toggled by long-tap). Brightness 0..100, signal 0..3 bars.
+    @Volatile private var controlOpen = false
+    private var ctrlBrightness = 50
+    private var ctrlAuto = false
+    @Volatile private var ctrlSignal = 0
+
     private var connectionJob: Job? = null
 
     /**
@@ -74,25 +89,88 @@ class MaverickBridge(
     fun update(snapshot: HudSnapshot) {
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
-        lastSnapshot = stamped
-        hudScreen.apply(stamped)
+        publish(snapshot.copy(pageIndex = pageIndex, battery = glassesBattery))
         mountScreenIfNeeded()
     }
 
+    /** Push a snapshot to the glasses and mirror it for the Karoo data field. */
+    private fun publish(s: HudSnapshot) {
+        lastSnapshot = s
+        hudScreen.apply(s)
+        HudState.snapshot.value = s
+    }
+
+    /** Advance to the next page — used by a single tap on the Karoo data field. */
+    fun nextPage() = changePage(+1)
+
     /**
-     * A forward/back temple-pad swipe flips the page — in any mode, so the rider can always
-     * override (AUTO keeps cycling from wherever they land). Taps and long-taps are ignored.
+     * Temple-pad gestures. A single tap toggles the centre control window. While it's open,
+     * forward/back adjust brightness and a long-tap toggles auto-brightness; while it's closed,
+     * forward/back flip the page (any mode — AUTO keeps cycling from wherever they land).
      */
     private fun handleTouch(direction: TouchDirection) {
+        if (controlOpen) {
+            when (direction) {
+                TouchDirection.tap -> toggleControl()
+                TouchDirection.forward -> adjustBrightness(+10)
+                TouchDirection.backward -> adjustBrightness(-10)
+                TouchDirection.longTap -> toggleAuto()
+                else -> {}
+            }
+            return
+        }
+        when (direction) {
+            TouchDirection.tap -> toggleControl()
+            TouchDirection.forward -> changePage(+1)
+            TouchDirection.backward -> changePage(-1)
+            else -> {}
+        }
+    }
+
+    private fun changePage(delta: Int) {
         val count = lastSnapshot.pages.size
         if (count <= 1) return
-        pageIndex = when (direction) {
-            TouchDirection.forward -> (pageIndex + 1) % count
-            TouchDirection.backward -> (pageIndex - 1 + count) % count
-            else -> return // tap / longTap / unknown — leave the page as-is
+        pageIndex = (pageIndex + delta + count) % count
+        publish(lastSnapshot.copy(pageIndex = pageIndex))
+    }
+
+    private fun toggleControl() {
+        controlOpen = !controlOpen
+        if (controlOpen) {
+            runCatching {
+                ctrlBrightness = Evs.instance().display().getBrightness().toInt()
+                ctrlAuto = Evs.instance().display().autoBrightness().isEnabled()
+            }.onFailure { Timber.w(it, "read brightness") }
         }
-        hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
+        pushControl()
+    }
+
+    private fun adjustBrightness(delta: Int) {
+        ctrlBrightness = (ctrlBrightness + delta).coerceIn(0, 100)
+        ctrlAuto = false
+        runCatching {
+            Evs.instance().display().autoBrightness().enable(false)
+            Evs.instance().display().setBrightness(ctrlBrightness.toShort())
+        }.onFailure { Timber.w(it, "set brightness") }
+        pushControl()
+    }
+
+    private fun toggleAuto() {
+        ctrlAuto = !ctrlAuto
+        runCatching { Evs.instance().display().autoBrightness().enable(ctrlAuto) }
+            .onFailure { Timber.w(it, "toggle auto-brightness") }
+        pushControl()
+    }
+
+    private fun pushControl() {
+        hudScreen.setControl(controlOpen, ctrlBrightness, ctrlAuto, ctrlSignal)
+    }
+
+    private fun rssiToBars(rssi: Int): Int = when {
+        rssi >= -60 -> 3
+        rssi >= -72 -> 2
+        rssi >= -85 -> 1
+        else -> 0
     }
 
     fun shutdown() {
@@ -123,6 +201,15 @@ class MaverickBridge(
                         runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in 0..100 }
                     } else {
                         null
+                    }
+                    // Signal bars for the control window (BLE RSSI → 0..3).
+                    if (connected) {
+                        runCatching {
+                            comm.requestRssiRead { rssi ->
+                                ctrlSignal = rssiToBars(rssi)
+                                if (controlOpen) pushControl()
+                            }
+                        }
                     }
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
@@ -168,7 +255,7 @@ class MaverickBridge(
                     val count = lastSnapshot.pages.size
                     if (count > 1) {
                         pageIndex = (pageIndex + 1) % count
-                        hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
+                        publish(lastSnapshot.copy(pageIndex = pageIndex))
                     }
                 }
             }

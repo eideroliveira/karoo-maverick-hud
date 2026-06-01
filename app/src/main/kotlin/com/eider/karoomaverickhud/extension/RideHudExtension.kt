@@ -1,6 +1,10 @@
 package com.eider.karoomaverickhud.extension
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import com.eider.karoomaverickhud.maverick.MaverickBridge
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
@@ -39,9 +43,15 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var maverick: MaverickBridge
     private lateinit var rideStateFlow: StateFlow<RideState>
 
-    // Tappable in-ride field that shows link status and opens pairing. Reads the
-    // process-wide GlassesLinkState, so it needs no reference to [maverick].
+    // In-ride field that mirrors the glasses HUD. Reads the process-wide HudState/GlassesLinkState,
+    // so it needs no reference to [maverick]; a tap broadcasts [ACTION_NEXT_PAGE] back to us.
     override val types by lazy { listOf(GlassesDataType(extension)) }
+
+    private val nextPageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (::maverick.isInitialized) maverick.nextPage()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -58,6 +68,13 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
         maverick.start()
+
+        ContextCompat.registerReceiver(
+            this,
+            nextPageReceiver,
+            IntentFilter(ACTION_NEXT_PAGE),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
 
         startPipeline()
         startMaverickHealthMonitor()
@@ -80,10 +97,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
+        runCatching { unregisterReceiver(nextPageReceiver) }
         scope.cancel()
         maverick.shutdown()
         karoo.disconnect()
         super.onDestroy()
+    }
+
+    companion object {
+        /** Broadcast sent by a tap on the Karoo data field to advance the HUD page. */
+        const val ACTION_NEXT_PAGE = "com.eider.karoomaverickhud.NEXT_PAGE"
     }
 
     /**
