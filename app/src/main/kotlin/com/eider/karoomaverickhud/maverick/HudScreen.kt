@@ -48,6 +48,8 @@ class HudScreen : Screen(420f, 150f) {
     private val units = Array(cellCount) { Text() }
     private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
+    private val clockText = Text() // time of day, top-left
+    private val batteryText = Text() // Karoo battery %, top-right
 
     // One ImgSrc per glyph (each gets its own glasses image slot).
     private val imgPower = ImgSrc("ic_power.png", ImgSrc.Slot.s1)
@@ -99,6 +101,22 @@ class HudScreen : Screen(420f, 150f) {
             .setForegroundColor(EvsColor.Green.rgba)
             .addTo(this)
 
+        clockText
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(4f, 4f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .addTo(this)
+
+        batteryText
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.right)
+            .setXY(getWidth() - 4f, 4f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .addTo(this)
+
         statusText
             .setText("")
             .setResource(Font.StockFont.Small)
@@ -125,6 +143,10 @@ class HudScreen : Screen(420f, 150f) {
         val rows = snap.rows.coerceIn(MIN_ROWS, MAX_ROWS)
         if (rows != layoutRows) applyRows(rows)
         val activeCells = positions.size // 2 × rows
+
+        // Corners are always-on: time top-left, Karoo battery top-right.
+        clockText.setText(snap.clock)
+        batteryText.setText(snap.battery?.let { "$it%" } ?: "")
 
         // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
         if (!snap.recording && !snap.paused) {

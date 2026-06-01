@@ -55,6 +55,9 @@ class MaverickBridge(
     @Volatile private var pageIndex: Int = 0
     @Volatile private var lastSnapshot: HudSnapshot = HudSnapshot.empty
 
+    // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
+    @Volatile private var glassesBattery: Int? = null
+
     private var connectionJob: Job? = null
 
     /**
@@ -71,7 +74,7 @@ class MaverickBridge(
     fun update(snapshot: HudSnapshot) {
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        val stamped = snapshot.copy(pageIndex = pageIndex)
+        val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
         lastSnapshot = stamped
         hudScreen.apply(stamped)
         mountScreenIfNeeded()
@@ -112,10 +115,26 @@ class MaverickBridge(
                         GlassesLinkState.connected.value = connected
                         if (!connected) screenMounted = false
                     }
-                    val paired = configState.value.maverickDeviceId != null
-                    if (paired && !connected && !comm.isConnecting() && comm.hasConfiguredDevice()) {
-                        Timber.i("Auto-connecting to Maverick")
-                        comm.connectSecured()
+                    // Glasses battery for the HUD's top-right corner; stamped onto snapshots in update().
+                    glassesBattery = if (connected) {
+                        runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in 0..100 }
+                    } else {
+                        null
+                    }
+                    val cfg = configState.value
+                    val pairedId = cfg.maverickDeviceId
+                    if (pairedId != null && !connected && !comm.isConnecting()) {
+                        // The SDK can lose its configured device across process restarts; restore
+                        // it from our prefs so a ride reliably reconnects instead of sitting idle.
+                        if (!comm.hasConfiguredDevice()) {
+                            Timber.i("Restoring configured device $pairedId from prefs")
+                            runCatching { comm.setDeviceInfo(pairedId, cfg.maverickDeviceName ?: "") }
+                                .onFailure { Timber.w(it, "setDeviceInfo restore failed") }
+                        }
+                        if (comm.hasConfiguredDevice()) {
+                            Timber.i("Auto-connecting to Maverick")
+                            comm.connectSecured()
+                        }
                     }
                 }.onFailure { Timber.w(it, "connection loop error") }
                 delay(POLL_INTERVAL_MS)

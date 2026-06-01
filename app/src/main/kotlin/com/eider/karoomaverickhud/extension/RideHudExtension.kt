@@ -11,6 +11,7 @@ import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.models.ActiveRidePage
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
+import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -136,10 +137,18 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
                     rows = configFlow.value.rows,
+                    clock = currentClock(),
+                    // battery (glasses %) is stamped by MaverickBridge, which owns the Evs link.
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
+    }
+
+    /** Current time of day as "HH:mm" from the Karoo's clock, for the HUD's top-left corner. */
+    private fun currentClock(): String {
+        val cal = Calendar.getInstance()
+        return "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
     }
 
     /**
@@ -148,7 +157,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
      */
     private fun startMaverickHealthMonitor() {
         scope.launch {
-            var lastConnected = true
+            // Seed from the current state so the StateFlow's initial replay isn't mistaken for a
+            // drop (which would fire a phantom "disconnected" alert the moment a ride starts).
+            var lastConnected = maverick.connectionState.value
             maverick.connectionState.collect { connected ->
                 // Only nudge on an *unexpected* drop mid-ride — the ride-end disconnect
                 // is intentional and Idle by the time it lands, so it stays silent.

@@ -74,6 +74,10 @@ data class HudSnapshot(
     val pageIndex: Int,
     /** Rows to lay out (2 or 3); drives the screen's vertical placement and active-cell count. */
     val rows: Int = MAX_ROWS,
+    /** Time of day "HH:mm" for the top-left corner; blank hides it. */
+    val clock: String = "",
+    /** Maverick glasses battery percentage for the top-right corner; null hides it. */
+    val battery: Int? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)

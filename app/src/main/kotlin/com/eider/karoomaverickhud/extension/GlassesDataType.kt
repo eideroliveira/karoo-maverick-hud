@@ -30,9 +30,9 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
                 views.setTextViewText(
                     R.id.glasses_field_text,
                     if (connected) {
-                        context.getString(R.string.settings_status_connected, "")
+                        context.getString(R.string.field_status_connected)
                     } else {
-                        context.getString(R.string.settings_pair)
+                        context.getString(R.string.field_status_disconnected)
                     },
                 )
                 // No tap target in the page-editor preview; only attach it for the live field.

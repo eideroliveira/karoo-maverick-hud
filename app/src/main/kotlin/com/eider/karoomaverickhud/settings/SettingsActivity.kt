@@ -57,6 +57,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.everysight.evskit.android.Evs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -94,6 +95,16 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
     // without it, and the Karoo only powers GPS during a ride.
     var gpsBlocked by remember { mutableStateOf(value = false) }
 
+    // The real link state, polled from the SDK rather than inferred from the saved pairing —
+    // a paired device is not the same as a live connection.
+    var linkConnected by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            linkConnected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(false)
+            delay(1_000)
+        }
+    }
+
     // Our own pairing dialog (scan + tap to connect). Replaces the SDK's scan screen,
     // whose device list doesn't render on the Karoo.
     var showPairDialog by remember { mutableStateOf(false) }
@@ -115,6 +126,19 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
             }
             if (needed.isEmpty()) showPairDialog = true else permLauncher.launch(needed.toTypedArray())
         }
+    }
+
+    // Bring the link up for an already-paired device, restoring it into the SDK first if the
+    // SDK forgot it (e.g. after a process restart).
+    val triggerConnect = {
+        runCatching {
+            val comm = Evs.instance().comm()
+            if (!comm.hasConfiguredDevice() && cfg.maverickDeviceId != null) {
+                comm.setDeviceInfo(cfg.maverickDeviceId, cfg.maverickDeviceName ?: "")
+            }
+            if (comm.hasConfiguredDevice() && !comm.isConnected() && !comm.isConnecting()) comm.connectSecured()
+        }.onFailure { Timber.w(it, "Connect failed") }
+        Unit
     }
 
     if (showPairDialog) {
@@ -159,30 +183,41 @@ private fun SettingsScreen(modifier: Modifier = Modifier, autoPair: Boolean = fa
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // Glasses section
+        val hasDevice = cfg.maverickDeviceId != null
+        val deviceName = cfg.maverickDeviceName ?: cfg.maverickDeviceId ?: ""
         Text(ctx.getString(com.eider.karoomaverickhud.R.string.settings_glasses_section), style = MaterialTheme.typography.titleMedium)
         Text(
-            text = if (cfg.maverickDeviceName != null)
-                ctx.getString(com.eider.karoomaverickhud.R.string.settings_status_connected, cfg.maverickDeviceName)
-            else
-                ctx.getString(com.eider.karoomaverickhud.R.string.settings_status_disconnected),
+            text = when {
+                !hasDevice -> "No glasses paired"
+                linkConnected -> "Connected: $deviceName"
+                else -> "Paired: $deviceName — not connected"
+            },
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(onClick = triggerPair) { Text(ctx.getString(com.eider.karoomaverickhud.R.string.settings_pair)) }
+            when {
+                // No device yet: the only action is to pair one.
+                !hasDevice -> Button(onClick = triggerPair) {
+                    Text(ctx.getString(com.eider.karoomaverickhud.R.string.settings_pair))
+                }
+                // Paired but the link is down: let the user bring it up without re-pairing.
+                !linkConnected -> Button(onClick = triggerConnect) { Text("Connect") }
+            }
 
-            OutlinedButton(
-                onClick = {
-                    runCatching {
-                        val comm = Evs.instance().comm()
-                        comm.disconnect()
-                        comm.setDeviceInfo("", "") // clear the SDK's configured device
-                    }.onFailure { Timber.w(it, "Unpair failed") }
-                    scope.launch { HudPreferences.setPairedDevice(ctx, null, null) }
-                },
-                enabled = cfg.maverickDeviceId != null,
-            ) { Text(ctx.getString(com.eider.karoomaverickhud.R.string.settings_unpair)) }
+            if (hasDevice) {
+                OutlinedButton(
+                    onClick = {
+                        runCatching {
+                            val comm = Evs.instance().comm()
+                            comm.disconnect()
+                            comm.setDeviceInfo("", "") // clear the SDK's configured device
+                        }.onFailure { Timber.w(it, "Unpair failed") }
+                        scope.launch { HudPreferences.setPairedDevice(ctx, null, null) }
+                    },
+                ) { Text(ctx.getString(com.eider.karoomaverickhud.R.string.settings_unpair)) }
+            }
         }
 
         if (gpsBlocked) {

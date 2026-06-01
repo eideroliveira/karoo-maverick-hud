@@ -15,5 +15,7 @@
     <string name="extension_disconnected_alert">Maverick glasses disconnected</string>
     <string name="glasses_field">Glasses</string>
     <string name="glasses_field_desc">Maverick link status; tap to pair/connect</string>
+    <string name="field_status_connected">Connected</string>
+    <string name="field_status_disconnected">Disconnected\nTap to pair</string>
     <string name="pair_action">Pair glasses</string>
 </resources>
