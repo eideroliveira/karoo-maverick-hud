@@ -22,19 +22,36 @@ import com.eider.karoomaverickhud.extension.MIN_ROWS
 /**
  * HUD on a 420×150 Maverick screen. Data lives in the two edge columns (the first and last of
  * a notional four) so the centre stays a clear field of vision, with two or three rows each —
- * up to six cells. Each cell is a small icon + a zone-coloured value + its unit; no labels.
- * Temple-pad touches go to [onTouch] for MANUAL page switching.
+ * up to six cells. Each cell is an icon + a large zone-coloured value + a smaller unit; no labels.
+ * The right column is flush to the screen's right edge. Forward/back temple-pad swipes go to
+ * [onTouch] for page switching.
  */
 class HudScreen : Screen(420f, 150f) {
 
-    private data class Pos(val iconX: Float, val valueX: Float, val unitX: Float, val y: Float)
+    private data class Pos(
+        val iconX: Float,
+        val valueX: Float,
+        val unitX: Float,
+        val y: Float,
+        val valueAlign: Align,
+        val unitAlign: Align,
+    )
+
+    // Units render below the smallest stock font via this scale, so the value reads bigger.
+    private val unitScale = 0.8f
 
     /** Cell positions for a row count: all left-column rows (top→bottom) then all right-column. */
     private fun positionsFor(rows: Int): Array<Pos> {
-        // Centre x≈108..312 stays clear; two rows sit balanced, three rows fill the height.
-        val ys = if (rows <= MIN_ROWS) floatArrayOf(48f, 102f) else floatArrayOf(30f, 74f, 118f)
-        val left = ys.map { Pos(iconX = 4f, valueX = 30f, unitX = 70f, y = it) }
-        val right = ys.map { Pos(iconX = 314f, valueX = 340f, unitX = 380f, y = it) }
+        // Extra headroom below the time/battery strip; centre x≈122..286 stays clear.
+        val ys = if (rows <= MIN_ROWS) floatArrayOf(58f, 110f) else floatArrayOf(42f, 80f, 118f)
+        // Left column hugs the left edge, reading icon → value → unit.
+        val left = ys.map {
+            Pos(iconX = 4f, valueX = 32f, unitX = 92f, y = it, valueAlign = Align.left, unitAlign = Align.left)
+        }
+        // Right column is flush to the right edge: value right-aligned, unit pinned to the edge.
+        val right = ys.map {
+            Pos(iconX = 288f, valueX = 368f, unitX = 416f, y = it, valueAlign = Align.right, unitAlign = Align.right)
+        }
         return (left + right).toTypedArray()
     }
 
@@ -79,18 +96,19 @@ class HudScreen : Screen(420f, 150f) {
                 .addTo(this)
             values[i]
                 .setText("")
-                .setResource(Font.StockFont.Small)
-                .setTextAlign(Align.left)
+                .setResource(Font.StockFont.Medium)
+                .setTextAlign(p.valueAlign)
                 .setXY(p.valueX, p.y)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
             units[i]
                 .setText("")
                 .setResource(Font.StockFont.Small)
-                .setTextAlign(Align.left)
+                .setTextAlign(p.unitAlign)
                 .setXY(p.unitX, p.y)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
+            units[i].scale(unitScale, unitScale)
         }
 
         pauseDot
@@ -133,8 +151,9 @@ class HudScreen : Screen(420f, 150f) {
         for (i in positions.indices) {
             val p = positions[i]
             icons[i].setXY(p.iconX, p.y - 6f)
-            values[i].setXY(p.valueX, p.y)
-            units[i].setXY(p.unitX, p.y)
+            values[i].setTextAlign(p.valueAlign).setXY(p.valueX, p.y)
+            units[i].setTextAlign(p.unitAlign).setXY(p.unitX, p.y)
+            units[i].scale(unitScale, unitScale)
         }
     }
 

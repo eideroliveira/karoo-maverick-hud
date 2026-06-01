@@ -80,14 +80,17 @@ class MaverickBridge(
         mountScreenIfNeeded()
     }
 
-    /** MANUAL mode: a temple-pad touch flips the page. Ignored in AUTO/FOLLOW_KAROO. */
+    /**
+     * A forward/back temple-pad swipe flips the page — in any mode, so the rider can always
+     * override (AUTO keeps cycling from wherever they land). Taps and long-taps are ignored.
+     */
     private fun handleTouch(direction: TouchDirection) {
-        if (configState.value.pageMode != PageMode.MANUAL) return
         val count = lastSnapshot.pages.size
         if (count <= 1) return
         pageIndex = when (direction) {
+            TouchDirection.forward -> (pageIndex + 1) % count
             TouchDirection.backward -> (pageIndex - 1 + count) % count
-            else -> (pageIndex + 1) % count // forward / tap / longTap -> next
+            else -> return // tap / longTap / unknown — leave the page as-is
         }
         hudScreen.apply(lastSnapshot.copy(pageIndex = pageIndex))
     }
