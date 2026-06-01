@@ -13,6 +13,7 @@ import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.models.ActiveRidePage
+import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
 import java.util.Calendar
@@ -123,6 +124,17 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+        // Auto workout page (power & cadence vs interval target + interval time-left); null when no
+        // workout is active. Prepended to the pages so it shows up first whenever a workout runs.
+        val workoutFlow = combine(
+            karoo.streamDataFlow(DataType.Type.WORKOUT_POWER_TARGET),
+            karoo.streamDataFlow(DataType.Type.WORKOUT_CADENCE_TARGET),
+            karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
+            karoo.streamDataFlow(DataType.Type.POWER),
+            karoo.streamDataFlow(DataType.Type.CADENCE),
+        ) { pt, ct, iv, pw, cd -> FieldFormat.workoutPage(pt, ct, iv, pw, cd) }
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row
         // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
         // use the user's custom pages.
@@ -152,8 +164,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             cellsFlow.map { cells -> layout to cells }
         }
             .sample(configFlow.value.refreshIntervalMs)
-            .combine(rideStateFlow) { (layout, cells), ride ->
-                val pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } }
+            .combine(rideStateFlow) { (layout, cells), ride -> Triple(layout, cells, ride) }
+            .combine(workoutFlow) { (layout, cells, ride), workout ->
+                val basePages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } }
+                // A live workout gets its own page, shown first.
+                val pages = if (workout != null) listOf(workout) + basePages else basePages
                 HudSnapshot(
                     pages = pages,
                     paused = ride is RideState.Paused,

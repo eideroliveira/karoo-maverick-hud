@@ -336,6 +336,7 @@ class HudScreen : Screen(420f, 150f) {
         HudColor.ORANGE -> EvsColor.Orange.rgba
         HudColor.RED -> EvsColor.Red.rgba
         HudColor.PURPLE -> EvsColor.Purple.rgba
+        HudColor.BLUE -> EvsColor.Blue.rgba
     }
 
     override fun onTouch(touch: TouchDirection) {

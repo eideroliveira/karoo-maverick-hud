@@ -24,7 +24,7 @@ fun cellsForRows(rows: Int): Int = COLUMNS * rows.coerceIn(MIN_ROWS, MAX_ROWS)
  * white→green→orange→red→purple scale: Z1 endurance/leisure through Z5+ anaerobic. Non-training
  * fields and missing data stay [WHITE] (neutral — the color only "lights up" for effort).
  */
-enum class HudColor { WHITE, GREEN, ORANGE, RED, PURPLE }
+enum class HudColor { WHITE, GREEN, ORANGE, RED, PURPLE, BLUE }
 
 /** Small glyph drawn next to a value, mapped to an asset by the screen. */
 enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE }
@@ -122,6 +122,73 @@ object FieldFormat {
 
     private fun isAverage(dataTypeId: String): Boolean =
         dataTypeId.contains("AVERAGE", ignoreCase = true) || dataTypeId.contains("AVG", ignoreCase = true)
+
+    /**
+     * The auto workout page when a workout is active (any target/interval stream is live), else
+     * null. Shows current power & cadence against the interval target (unit shows the target) and
+     * the interval time remaining. Colour reflects range: below → blue, in range → green, above →
+     * red (uses the target's min/max band when present, otherwise ±5% of the target value).
+     */
+    fun workoutPage(
+        powerTarget: StreamState,
+        cadenceTarget: StreamState,
+        intervalRemaining: StreamState,
+        power: StreamState,
+        cadence: StreamState,
+    ): List<HudCell>? {
+        val active = powerTarget is StreamState.Streaming ||
+            cadenceTarget is StreamState.Streaming ||
+            intervalRemaining is StreamState.Streaming
+        if (!active) return null
+
+        val curPower = (power as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.POWER)
+        val pT = targetOf(powerTarget)
+        val curCadence = (cadence as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.CADENCE)
+        val cT = targetOf(cadenceTarget)
+        val secLeft = (intervalRemaining as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH)
+
+        return listOf(
+            HudCell(curPower.intOrDash(), targetLabel(pT, "W"), rangeColor(curPower, pT), HudIcon.POWER),
+            HudCell(curCadence.intOrDash(), targetLabel(cT, "rpm"), rangeColor(curCadence, cT), HudIcon.CADENCE),
+            HudCell(formatDuration(secLeft), "left", HudColor.WHITE, HudIcon.TIME),
+        )
+    }
+
+    private data class Target(val value: Double?, val min: Double?, val max: Double?)
+
+    private fun targetOf(state: StreamState): Target {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return Target(null, null, null)
+        return Target(
+            dp.values[DataType.Field.WORKOUT_TARGET_VALUE],
+            dp.values[DataType.Field.WORKOUT_TARGET_MIN_VALUE],
+            dp.values[DataType.Field.WORKOUT_TARGET_MAX_VALUE],
+        )
+    }
+
+    private fun targetLabel(t: Target, unit: String): String =
+        t.value?.let { "/${it.roundToInt()} $unit" } ?: unit
+
+    private fun rangeColor(current: Double?, t: Target): HudColor {
+        if (current == null) return HudColor.WHITE
+        val min = t.min
+        val max = t.max
+        return when {
+            min != null && max != null -> when {
+                current < min -> HudColor.BLUE
+                current > max -> HudColor.RED
+                else -> HudColor.GREEN
+            }
+            t.value != null -> {
+                val tol = t.value * 0.05
+                when {
+                    current < t.value - tol -> HudColor.BLUE
+                    current > t.value + tol -> HudColor.RED
+                    else -> HudColor.GREEN
+                }
+            }
+            else -> HudColor.WHITE
+        }
+    }
 
     private fun formatGeneric(dataTypeId: String, state: StreamState): HudCell {
         val raw = (state as? StreamState.Streaming)?.dataPoint
