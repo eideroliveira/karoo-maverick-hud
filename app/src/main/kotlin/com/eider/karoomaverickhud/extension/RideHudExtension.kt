@@ -124,16 +124,29 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
-        // Auto workout page (power & cadence vs interval target + interval time-left); null when no
-        // workout is active. Prepended to the pages so it shows up first whenever a workout runs.
+        // Auto workout page — only rendered when a structured workout is loaded
+        // ([FieldFormat.workoutPage] gates on WORKOUT_STEP_COUNT > 0 and returns null otherwise).
+        // 7 streams feed it; we use combine's vararg form since the typed 5-arg overload doesn't
+        // reach. Order matches workoutPage's parameter list.
         val workoutFlow = combine(
             karoo.streamDataFlow(DataType.Type.WORKOUT_POWER_TARGET),
             karoo.streamDataFlow(DataType.Type.WORKOUT_CADENCE_TARGET),
-            karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
             karoo.streamDataFlow(DataType.Type.POWER),
             karoo.streamDataFlow(DataType.Type.CADENCE),
-        ) { pt, ct, iv, pw, cd -> FieldFormat.workoutPage(pt, ct, iv, pw, cd) }
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT),
+            karoo.streamDataFlow(DataType.Type.NORMALIZED_POWER_LAP),
+            karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
+        ) { states ->
+            FieldFormat.workoutPage(
+                powerTarget = states[0],
+                cadenceTarget = states[1],
+                power = states[2],
+                cadence = states[3],
+                intervalCount = states[4],
+                normalizedPower = states[5],
+                timeRemaining = states[6],
+            )
+        }.stateIn(scope, SharingStarted.Eagerly, null)
 
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row
         // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
@@ -144,21 +157,31 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
                 if (fields.isEmpty()) emptyList() else listOf(fields)
             } else {
-                cfg.pages.map { it.take(cap) }.filter { it.isNotEmpty() }
+                cfg.pages.asSequence().map { it.take(cap) }.filter { it.isNotEmpty() }.toList()
             }
         }.distinctUntilChanged()
 
         layoutFlow.flatMapLatest { layout ->
-            val ids = layout.flatten().distinct()
+            // CADENCE colouring needs the live power reading for its under-gear rule, so we
+            // subscribe to POWER whenever CADENCE is shown even if POWER isn't itself displayed.
+            // (POWER stays out of the rendered layout; only [ids] grows.)
+            val displayed = layout.asSequence().flatten().distinct().toList()
+            val ids = if ((DataType.Type.CADENCE in displayed) && (DataType.Type.POWER !in displayed)) {
+                displayed + DataType.Type.POWER
+            } else displayed
             val cellsFlow = if (ids.isEmpty()) {
                 flowOf(emptyMap())
             } else {
+                // One context per layout subscription — carries the last power reading and the
+                // under-gear dwell timer that the cadence colour rule needs. Re-created on every
+                // layout change so a page swap doesn't leak a stale timer.
+                val ctx = FormatContext()
                 val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
                 merge(*streams.toTypedArray())
                     .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
                         val cfg = configFlow.value
                         val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence)
-                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones))
+                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx))
                     }
             }
             cellsFlow.map { cells -> layout to cells }
@@ -186,7 +209,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     /** Current time of day as "HH:mm" from the Karoo's clock, for the HUD's top-left corner. */
     private fun currentClock(): String {
         val cal = Calendar.getInstance()
-        return "%02d:%02d".format(cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE))
+        return "%02d:%02d".format(cal[Calendar.HOUR_OF_DAY], cal[Calendar.MINUTE])
     }
 
     /**
