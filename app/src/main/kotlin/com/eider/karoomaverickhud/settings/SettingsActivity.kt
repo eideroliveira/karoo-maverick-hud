@@ -105,9 +105,11 @@ private fun SettingsRoot(autoPair: Boolean) {
     var screen by remember { mutableStateOf("hub") }
     val values = rememberDemoValues()
     var previewPage by remember { mutableStateOf(0) }
+    // Bumped on a manual tap to restart the auto-cycle timer, so a tap gives full control.
+    var previewCycleReset by remember { mutableStateOf(0) }
 
-    // Cycle the hub's live preview through the configured pages.
-    LaunchedEffect(cfg.pages.size, cfg.autoCycleMs) {
+    // Cycle the hub's live preview through the configured pages (restarts when tapped).
+    LaunchedEffect(cfg.pages.size, cfg.autoCycleMs, previewCycleReset) {
         while (true) {
             delay(cfg.autoCycleMs.coerceAtLeast(1500L))
             if (cfg.pages.isNotEmpty()) previewPage = (previewPage + 1) % cfg.pages.size
@@ -224,7 +226,11 @@ private fun SettingsRoot(autoPair: Boolean) {
         AppBar(screen, onBack = { screen = "hub" })
         Box(Modifier.fillMaxSize()) {
             when (screen) {
-                "hub" -> HubScreen(cfg, linkConnected, battery = null, values = values, previewPage = previewPage, nav = { screen = it })
+                "hub" -> HubScreen(cfg, linkConnected, battery = null, values = values, previewPage = previewPage, nav = { screen = it },
+                    onPreviewTap = {
+                        if (cfg.pages.isNotEmpty()) previewPage = (previewPage + 1) % cfg.pages.size
+                        previewCycleReset++
+                    })
                 "profile" -> ProfileScreen(cfg, ctx, scope)
                 "gear" -> GearScreen(cfg, ctx, scope)
                 "pages" -> PagesScreen(cfg, ctx, scope, values)

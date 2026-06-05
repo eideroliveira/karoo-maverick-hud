@@ -74,6 +74,7 @@ fun HubScreen(
     values: Map<String, DemoVal>,
     previewPage: Int,
     nav: (String) -> Unit,
+    onPreviewTap: () -> Unit = {},
 ) {
     val totalFields = cfg.pages.sumOf { it.size }
     val dt = drivetrainById(cfg.gear.drivetrainId)
@@ -94,9 +95,10 @@ fun HubScreen(
                 }
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                GlassesPreview(cfg, page, values, previewPage, cfg.pages.size, width = 448.dp)
+                GlassesPreview(cfg, page, values, previewPage, cfg.pages.size, width = 448.dp,
+                    onTap = if (cfg.pages.size > 1) onPreviewTap else null)
             }
-            KText("LIVE PREVIEW · WHAT THE RIDER SEES", color = K.text3, size = 11.sp, letterSpacing = 1.sp,
+            KText("LIVE PREVIEW · TAP TO SWITCH PAGE", color = K.text3, size = 11.sp, letterSpacing = 1.sp,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
         }
 

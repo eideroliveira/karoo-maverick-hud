@@ -175,10 +175,14 @@ fun GlassesPreview(
     pageIndex: Int,
     totalPages: Int,
     width: Dp = 448.dp,
+    onTap: (() -> Unit)? = null,
 ) {
     val big = page.size <= 4
+    // A 3-row page (5–6 fields) needs a taller lens or the bottom row's label clips at the edge.
+    val lensH = if (big) 150.dp else 184.dp
+    val colH = if (big) 126.dp else 160.dp
     val (left, right) = columnOrder(page.size)
-    LensBox(width) {
+    LensBox(width, lensHeight = lensH) {
         // centre fixation dot
         Box(Modifier.align(Alignment.Center).size(6.dp).clip(RoundedCornerShape(3.dp))
             .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(3.dp)))
@@ -186,11 +190,11 @@ fun GlassesPreview(
             Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.height(126.dp)) {
+            Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.height(colH)) {
                 left.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = false, big = big) }
             }
             Column(verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End,
-                modifier = Modifier.height(126.dp)) {
+                modifier = Modifier.height(colH)) {
                 right.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = true, big = big) }
             }
         }
@@ -204,6 +208,10 @@ fun GlassesPreview(
                         .background(if (i == pageIndex) K.accent else Color(0x40FFFFFF)))
                 }
             }
+        }
+        // Transparent tap target on top, filling the lens — switches page on tap.
+        if (onTap != null) {
+            Box(Modifier.matchParentSize().clickable(remember { MutableInteractionSource() }, indication = null, onClick = onTap))
         }
     }
 }
