@@ -1,3 +1,5 @@
+@file:Suppress("unused", "UNUSED_VARIABLE", "CanBeParameter")
+
 package io.hammerhead.karooext
 
 import android.content.Context
