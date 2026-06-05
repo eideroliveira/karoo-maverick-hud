@@ -180,8 +180,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 merge(*streams.toTypedArray())
                     .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
                         val cfg = configFlow.value
-                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence)
-                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx))
+                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
+                        val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
+                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear))
                     }
             }
             cellsFlow.map { cells -> layout to cells }
@@ -198,7 +199,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
                     rows = configFlow.value.rows,
-                    clock = currentClock(),
+                    clock = if (configFlow.value.showClock) currentClock() else "",
+                    showIcons = configFlow.value.showIcons,
                     // battery (glasses %) is stamped by MaverickBridge, which owns the Evs link.
                 )
             }

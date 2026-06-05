@@ -5,6 +5,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.serialization.Serializable
 
 /** The HUD draws two edge columns (first & last of a notional four), so the centre stays clear. */
 const val COLUMNS = 2
@@ -20,15 +21,80 @@ const val MAX_CELLS = COLUMNS * MAX_ROWS
 fun cellsForRows(rows: Int): Int = COLUMNS * rows.coerceIn(MIN_ROWS, MAX_ROWS)
 
 /**
- * Value color, mapped to an EvsColor by the screen. Drives the 7-step training-zone palette:
- * Z0 sub-recovery (cyan), Z1 recovery (white), Z2 endurance (green), Z3 tempo (yellow),
- * Z4 threshold (orange), Z5 VO2max (red), Z6+ anaerobic/neuromuscular (purple). Non-training
- * fields and missing data stay [WHITE] (neutral — the color only "lights up" for effort).
+ * Value color, mapped to an EvsColor by the screen. The full palette the renderer understands;
+ * which hues a given field actually uses is decided by the zone maps below. Non-training fields
+ * and missing data stay [WHITE] (neutral — the color only "lights up" for effort).
  */
 enum class HudColor { WHITE, GREEN, YELLOW, ORANGE, RED, PURPLE, CYAN }
 
-/** Zone thresholds from the user's profile; 0 disables coloring for that field. */
-data class ZoneConfig(val ftp: Int, val maxHr: Int, val idealCadence: Int) {
+/**
+ * One editable training-zone band, as a percentage window of a base value (FTP or MaxHR).
+ * [lo]/[hi] are inclusive-low, exclusive-high percentages; [name]/[sub] are display-only.
+ * Serializable so it round-trips through [com.eider.karoomaverickhud.settings.HudPreferences].
+ */
+@Serializable
+data class ZoneBand(val name: String, val sub: String, val lo: Int, val hi: Int)
+
+/**
+ * Power zones: the full 7-band model (cyan Z0 → purple Z6), named for their common meanings.
+ * Boundaries are % of FTP; the rider can edit them in settings, but the count (and so the colour
+ * mapping below) is fixed at seven.
+ */
+val DEFAULT_POWER_ZONES: List<ZoneBand> = listOf(
+    ZoneBand("Z0", "Leisure", 0, 45),
+    ZoneBand("Z1", "Recovery", 45, 55),
+    ZoneBand("Z2", "Endurance", 55, 75),
+    ZoneBand("Z3", "Tempo", 75, 90),
+    ZoneBand("Z4", "Threshold", 90, 105),
+    ZoneBand("Z5", "VO2 Max", 105, 120),
+    ZoneBand("Z6", "Anaerobic", 120, 150),
+)
+
+/** HR zones: classic 5-color Coggan bands (no Z0). Boundaries are % of MaxHR. */
+val DEFAULT_HR_ZONES: List<ZoneBand> = listOf(
+    ZoneBand("Z1", "Recovery", 0, 60),
+    ZoneBand("Z2", "Aerobic", 60, 70),
+    ZoneBand("Z3", "Tempo", 70, 80),
+    ZoneBand("Z4", "Threshold", 80, 90),
+    ZoneBand("Z5", "Max", 90, 110),
+)
+
+/** Colour per zone index — kept in lockstep with the band lists' fixed lengths. */
+val POWER_ZONE_COLORS = listOf(
+    HudColor.CYAN, HudColor.WHITE, HudColor.GREEN, HudColor.YELLOW, HudColor.ORANGE, HudColor.RED, HudColor.PURPLE,
+)
+val HR_ZONE_COLORS = listOf(
+    HudColor.WHITE, HudColor.GREEN, HudColor.ORANGE, HudColor.RED, HudColor.PURPLE,
+)
+
+/** The band whose [ZoneBand.lo] the percentage clears, searched top-down (the design's rule). */
+fun zoneIndexByPct(zones: List<ZoneBand>, pct: Double): Int {
+    for (i in zones.indices.reversed()) if (pct >= zones[i].lo) return i
+    return 0
+}
+
+/**
+ * The rider's configured drivetrain, used to resolve teeth from a reported gear *position* when
+ * the shifting sensor doesn't report teeth directly. [front]/[rear] are tooth counts (chainrings,
+ * cassette cogs). [display] is the HUD readout style: "teeth" (50/14), "ratio" (3.57), "inches".
+ */
+data class GearLayout(
+    val front: List<Int> = emptyList(),
+    val rear: List<Int> = emptyList(),
+    val display: String = "teeth",
+)
+
+/**
+ * Zone thresholds from the user's profile; 0 base disables coloring for that field. Carries the
+ * editable band lists so the renderer and the settings preview colour identically.
+ */
+data class ZoneConfig(
+    val ftp: Int,
+    val maxHr: Int,
+    val idealCadence: Int,
+    val powerZones: List<ZoneBand> = DEFAULT_POWER_ZONES,
+    val hrZones: List<ZoneBand> = DEFAULT_HR_ZONES,
+) {
     companion object {
         val NONE = ZoneConfig(0, 0, 0)
     }
@@ -50,30 +116,86 @@ class FormatContext {
     var nowMs: () -> Long = { System.currentTimeMillis() }
 }
 
-/**
- * The known fields with first-class formatting. [dataTypeId] stays aligned with
- * [DataType.Type] so the field picker and Karoo-page mirror agree.
- */
-enum class HudFieldId(val dataTypeId: String, val label: String) {
-    POWER(DataType.Type.POWER, "POWER"),
-    CADENCE(DataType.Type.CADENCE, "CAD"),
-    LR_BALANCE(DataType.Type.PEDAL_POWER_BALANCE, "L/R"),
-    SPEED(DataType.Type.SPEED, "SPEED"),
-    DISTANCE(DataType.Type.DISTANCE, "DIST"),
-    AVG_SPEED(DataType.Type.AVERAGE_SPEED, "AVG"),
-    HEART_RATE(DataType.Type.HEART_RATE, "HR"),
-    ELAPSED_TIME(DataType.Type.ELAPSED_TIME, "TIME"),
-    GEARS(DataType.Type.SHIFTING_GEARS, "GEAR"),
-}
+/** How a field's value is read & formatted. Drives unit, conversion and zone colouring. */
+enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER }
 
-/** One rendered field: the value, its unit/label, and a zone color. */
+/**
+ * A field the HUD knows how to render. [id] is the Karoo [DataType.Type]. [label] is the picker
+ * name. [kind] drives formatting/colour. [zone] enables training-zone colouring (power/HR).
+ * [unit] overrides the HUD unit text outright (e.g. "NP", "ride", "lap"); otherwise the unit is
+ * the kind's base ("W", "bpm", "km/h"…) with [suffix] appended ("avg", "lap", "LL"). [valueField]
+ * names the [DataType.Field] to read; null reads the point's single value.
+ */
+data class FieldSpec(
+    val id: String,
+    val label: String,
+    val kind: FieldKind,
+    val icon: HudIcon? = null,
+    val zone: Boolean = false,
+    val unit: String? = null,
+    val suffix: String = "",
+    val valueField: String? = null,
+)
+
+/** Small glyph drawn beside a value when the rider enables HUD icons; mapped to an asset by the screen. */
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE }
+
+/**
+ * The full field catalog — live metrics plus averages, max, NP/IF/VI, lap & last-lap variants,
+ * and time fields named for what they time (ride / lap / last lap / interval). The settings field
+ * picker is built from this list (see FieldCatalog), and the renderer dispatches on [FieldSpec.kind].
+ */
+val FIELD_SPECS: List<FieldSpec> = listOf(
+    // ---- live ----
+    FieldSpec(DataType.Type.POWER, "POWER", FieldKind.POWER, HudIcon.POWER, zone = true, valueField = DataType.Field.POWER),
+    FieldSpec(DataType.Type.CADENCE, "CAD", FieldKind.CADENCE, HudIcon.CADENCE, valueField = DataType.Field.CADENCE),
+    FieldSpec(DataType.Type.HEART_RATE, "HR", FieldKind.HR, HudIcon.HEART, zone = true, valueField = DataType.Field.HEART_RATE),
+    FieldSpec(DataType.Type.SPEED, "SPEED", FieldKind.SPEED, HudIcon.SPEED, valueField = DataType.Field.SPEED),
+    FieldSpec(DataType.Type.DISTANCE, "DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, valueField = DataType.Field.DISTANCE),
+    FieldSpec(DataType.Type.PEDAL_POWER_BALANCE, "L/R", FieldKind.BALANCE, HudIcon.BALANCE),
+    FieldSpec(DataType.Type.SHIFTING_GEARS, "GEAR", FieldKind.GEARS),
+    // ---- averages ----
+    FieldSpec(DataType.Type.AVERAGE_POWER, "AVG POWER", FieldKind.POWER, HudIcon.POWER, zone = true, suffix = "avg"),
+    FieldSpec(DataType.Type.AVERAGE_HR, "AVG HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "avg"),
+    FieldSpec(DataType.Type.AVERAGE_CADENCE, "AVG CAD", FieldKind.CADENCE, HudIcon.CADENCE, suffix = "avg"),
+    FieldSpec(DataType.Type.AVERAGE_SPEED, "AVG SPEED", FieldKind.SPEED, HudIcon.SPEED, suffix = "avg"),
+    // ---- max ----
+    FieldSpec(DataType.Type.MAX_POWER, "MAX POWER", FieldKind.POWER, HudIcon.POWER, zone = true, suffix = "max"),
+    FieldSpec(DataType.Type.MAX_HR, "MAX HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "max"),
+    FieldSpec(DataType.Type.MAX_SPEED, "MAX SPEED", FieldKind.SPEED, HudIcon.SPEED, suffix = "max"),
+    // ---- normalized power / IF / VI ----
+    FieldSpec(DataType.Type.NORMALIZED_POWER, "NP", FieldKind.POWER, HudIcon.POWER, zone = true, unit = "NP"),
+    FieldSpec(DataType.Type.INTENSITY_FACTOR, "IF", FieldKind.RATIO, unit = "IF"),
+    FieldSpec(DataType.Type.VARIABILITY_INDEX, "VI", FieldKind.RATIO, unit = "VI"),
+    FieldSpec(DataType.Type.TRAINING_STRESS_SCORE, "TSS", FieldKind.NUMBER, unit = "TSS"),
+    // ---- time, named for what they time ----
+    FieldSpec(DataType.Type.ELAPSED_TIME, "RIDE TIME", FieldKind.TIME, HudIcon.TIME, unit = "ride", valueField = DataType.Field.ELAPSED_TIME),
+    FieldSpec(DataType.Type.ELAPSED_TIME_LAP, "LAP TIME", FieldKind.TIME, HudIcon.TIME, unit = "lap", valueField = DataType.Field.ELAPSED_TIME),
+    FieldSpec(DataType.Type.ELAPSED_TIME_LAST_LAP, "LL TIME", FieldKind.TIME, HudIcon.TIME, unit = "last lap", valueField = DataType.Field.ELAPSED_TIME),
+    FieldSpec(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION, "INTERVAL", FieldKind.INTERVAL_TIME, HudIcon.TIME, unit = "interval", valueField = DataType.Field.WORKOUT_TIME_TO_STEP_FINISH),
+    // ---- this lap ----
+    FieldSpec(DataType.Type.DISTANCE_LAP, "LAP DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, suffix = "lap"),
+    FieldSpec(DataType.Type.AVERAGE_SPEED_LAP, "LAP SPD", FieldKind.SPEED, HudIcon.SPEED, suffix = "lap"),
+    FieldSpec(DataType.Type.NORMALIZED_POWER_LAP, "LAP NP", FieldKind.POWER, HudIcon.POWER, zone = true, unit = "NP lap"),
+    FieldSpec(DataType.Type.AVERAGE_LAP_HR, "LAP HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "lap"),
+    // ---- last lap (LL) ----
+    FieldSpec(DataType.Type.DISTANCE_LAP_LAST_LAP, "LL DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, suffix = "LL"),
+    FieldSpec(DataType.Type.AVERAGE_SPEED_LAST_LAP, "LL SPD", FieldKind.SPEED, HudIcon.SPEED, suffix = "LL"),
+    FieldSpec(DataType.Type.AVERAGE_POWER_LAST_LAP, "LL PWR", FieldKind.POWER, HudIcon.POWER, zone = true, suffix = "LL"),
+    FieldSpec(DataType.Type.NORMALIZED_POWER_LAST_LAP, "LL NP", FieldKind.POWER, HudIcon.POWER, zone = true, unit = "NP LL"),
+    FieldSpec(DataType.Type.AVERAGE_HR_LAST_LAP, "LL HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "LL"),
+    FieldSpec(DataType.Type.AVERAGE_CADENCE_LAST_LAP, "LL CAD", FieldKind.CADENCE, HudIcon.CADENCE, suffix = "LL"),
+)
+
+/** One rendered field: the value, its unit/label, a zone color, and an optional icon. */
 data class HudCell(
     val value: String,
     val units: String,
     val color: HudColor = HudColor.WHITE,
+    val icon: HudIcon? = null,
 ) {
     companion object {
-        fun blank(dataTypeId: String) = HudCell("--", "", HudColor.WHITE)
+        fun blank(dataTypeId: String) = HudCell("--", "", HudColor.WHITE, FieldFormat.iconFor(dataTypeId))
     }
 }
 
@@ -92,6 +214,8 @@ data class HudSnapshot(
     val clock: String = "",
     /** Maverick glasses battery percentage for the top-right corner; null hides it. */
     val battery: Int? = null,
+    /** Whether to draw each cell's icon next to its unit/label. */
+    val showIcons: Boolean = false,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
@@ -100,11 +224,17 @@ data class HudSnapshot(
 
 object FieldFormat {
 
-    private val knownByDataType = HudFieldId.entries.associateBy { it.dataTypeId }
+    private val specByDataType = FIELD_SPECS.associateBy { it.id }
+
+    /** The spec for a data type id, if the HUD knows how to render it. */
+    fun specFor(dataTypeId: String): FieldSpec? = specByDataType[dataTypeId]
+
+    /** Icon for a data type, if it has a glyph asset (used for blanks and when HUD icons are on). */
+    fun iconFor(dataTypeId: String): HudIcon? = specByDataType[dataTypeId]?.icon
 
     /** Short header label for a data type id — used by the settings field picker only. */
     fun labelFor(dataTypeId: String): String {
-        knownByDataType[dataTypeId]?.let { return it.label }
+        specByDataType[dataTypeId]?.let { return it.label }
         var s = dataTypeId
         if (s.contains("::")) s = s.substringAfterLast("::")
         s = s.removePrefix("TYPE_").removeSuffix("_ID").replace('_', ' ').trim()
@@ -112,9 +242,9 @@ object FieldFormat {
     }
 
     /**
-     * Format any data type into a [HudCell]. Known fields get tailored units and a training-zone
-     * color; unknown ones fall back to their raw single value. [ctx] carries cross-field state
-     * (last power, under-gear timer) that cadence colouring needs; null disables those rules.
+     * Format any data type into a [HudCell]. Known fields ([FIELD_SPECS]) get tailored units, a
+     * training-zone colour and an icon; unknown ones fall back to their raw single value. [ctx]
+     * carries cross-field state (last power, under-gear timer) that cadence colouring needs.
      */
     fun format(
         dataTypeId: String,
@@ -122,15 +252,26 @@ object FieldFormat {
         imperial: Boolean,
         zones: ZoneConfig,
         ctx: FormatContext? = null,
+        gear: GearLayout = GearLayout(),
     ): HudCell {
-        val known = knownByDataType[dataTypeId]
-        val cell = if (known != null) formatKnown(known, state, imperial, zones, ctx) else formatGeneric(dataTypeId, state)
-        // Average fields get an "avg" tag after the unit (e.g. "km/h avg", "W avg").
-        return if (isAverage(dataTypeId)) cell.copy(units = if (cell.units.isBlank()) "avg" else "${cell.units} avg") else cell
+        val spec = specByDataType[dataTypeId]
+        return if (spec != null) formatSpec(spec, state, imperial, zones, ctx, gear) else formatGeneric(dataTypeId, state)
     }
 
-    private fun isAverage(dataTypeId: String): Boolean =
-        dataTypeId.contains("AVERAGE", ignoreCase = true) || dataTypeId.contains("AVG", ignoreCase = true)
+    /** HUD unit text for a spec — the explicit override, else the kind's base unit + any suffix. */
+    private fun hudUnit(spec: FieldSpec, imperial: Boolean): String {
+        spec.unit?.let { return it }
+        val base = when (spec.kind) {
+            FieldKind.POWER -> "W"
+            FieldKind.HR -> "bpm"
+            FieldKind.CADENCE -> "rpm"
+            FieldKind.SPEED -> if (imperial) "mph" else "km/h"
+            FieldKind.DISTANCE -> if (imperial) "mi" else "km"
+            FieldKind.BALANCE -> "L/R %"
+            else -> ""
+        }
+        return if (spec.suffix.isEmpty()) base else "$base ${spec.suffix}".trim()
+    }
 
     /**
      * The auto workout page — rendered only when a workout is actually loaded to the ride
@@ -175,14 +316,14 @@ object FieldFormat {
 
         return listOf(
             // TL, TR
-            HudCell(curPower.intOrDash(), "W", rangeColor(curPower, pT)),
-            HudCell(curCadence.intOrDash(), "rpm", rangeColor(curCadence, cT)),
+            HudCell(curPower.intOrDash(), "W", rangeColor(curPower, pT), HudIcon.POWER),
+            HudCell(curCadence.intOrDash(), "rpm", rangeColor(curCadence, cT), HudIcon.CADENCE),
             // BL, BR
-            HudCell(npWatts.intOrDash(), "W NP", HudColor.WHITE),
-            HudCell(intervalLabel, intervalUnit, HudColor.WHITE),
+            HudCell(npWatts.intOrDash(), "W NP", HudColor.WHITE, HudIcon.POWER),
+            HudCell(intervalLabel, intervalUnit, HudColor.WHITE, HudIcon.TIME),
             // ML, MR
-            HudCell(pT.value?.roundToInt()?.toString() ?: "--", "W tgt", HudColor.WHITE),
-            HudCell(cT.value?.roundToInt()?.toString() ?: "--", "rpm tgt", HudColor.WHITE),
+            HudCell(pT.value?.roundToInt()?.toString() ?: "--", "W tgt", HudColor.WHITE, HudIcon.POWER),
+            HudCell(cT.value?.roundToInt()?.toString() ?: "--", "rpm tgt", HudColor.WHITE, HudIcon.CADENCE),
         )
     }
 
@@ -230,83 +371,57 @@ object FieldFormat {
         return HudCell(value, "", HudColor.GREEN)
     }
 
-    private fun formatKnown(field: HudFieldId, state: StreamState, imperial: Boolean, zones: ZoneConfig, ctx: FormatContext?): HudCell {
+    /** Render a known [FieldSpec] into a [HudCell], dispatching on [FieldSpec.kind]. */
+    private fun formatSpec(spec: FieldSpec, state: StreamState, imperial: Boolean, zones: ZoneConfig, ctx: FormatContext?, gear: GearLayout): HudCell {
         val raw = (state as? StreamState.Streaming)?.dataPoint
-        return when (field) {
-            HudFieldId.POWER -> {
-                val w = raw?.values?.get(DataType.Field.POWER)
-                // Cache the latest power reading so the next CADENCE update can evaluate
-                // the under-gear rule (rpm <60 sustained while power ≥ Z3 → red).
-                ctx?.lastPowerWatts = w
-                HudCell(w.intOrDash(), "W", powerColor(w, zones.ftp))
+        // Value via the spec's named field, else the point's single value.
+        val v = raw?.let { dp -> spec.valueField?.let { dp.values[it] } ?: dp.singleValue }
+        val unit = hudUnit(spec, imperial)
+        return when (spec.kind) {
+            FieldKind.POWER -> {
+                // Cache live power so the next CADENCE update can evaluate the under-gear rule.
+                if (spec.id == DataType.Type.POWER) ctx?.lastPowerWatts = v
+                val color = if (spec.zone) powerColor(v, zones.ftp, zones.powerZones) else HudColor.WHITE
+                HudCell(v.intOrDash(), unit, color, spec.icon)
             }
-
-            HudFieldId.CADENCE -> {
-                val c = raw?.values?.get(DataType.Field.CADENCE)
-                HudCell(c.intOrDash(), "rpm", cadenceColor(c, zones.idealCadence, zones.ftp, ctx))
+            FieldKind.HR -> {
+                val color = if (spec.zone) hrColor(v, zones.maxHr, zones.hrZones) else HudColor.WHITE
+                HudCell(v.intOrDash(), unit, color, spec.icon)
             }
-
-            HudFieldId.HEART_RATE -> {
-                val hr = raw?.values?.get(DataType.Field.HEART_RATE)
-                HudCell(hr.intOrDash(), "bpm", hrColor(hr, zones.maxHr))
+            FieldKind.CADENCE -> {
+                // Only the live cadence field gets the deviation/under-gear colouring (needs ctx).
+                val color = if (spec.id == DataType.Type.CADENCE) cadenceColor(v, zones.idealCadence, zones.ftp, ctx) else HudColor.WHITE
+                HudCell(v.intOrDash(), unit, color, spec.icon)
             }
-
-            HudFieldId.SPEED -> {
-                val mps = raw?.values?.get(DataType.Field.SPEED)
-                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.WHITE)
+            FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
+            FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
+            FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
+            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v?.let { it * 1000 }), unit, HudColor.WHITE, spec.icon) // v is seconds
+            FieldKind.RATIO -> HudCell(v?.let { "%.2f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
+            FieldKind.NUMBER -> HudCell(v.intOrDash(), unit, HudColor.WHITE, spec.icon)
+            FieldKind.BALANCE -> HudCell(formatBalance(raw), unit, balanceColor(raw), spec.icon)
+            FieldKind.GEARS -> {
+                val (gv, gu) = formatGears(raw, gear)
+                HudCell(gv, gu, HudColor.WHITE, spec.icon)
             }
-
-            HudFieldId.AVG_SPEED -> {
-                val mps = raw?.values?.get(DataType.Field.AVERAGE_SPEED)
-                HudCell(formatSpeed(mps, imperial), if (imperial) "mph" else "km/h", HudColor.WHITE)
-            }
-
-            HudFieldId.LR_BALANCE -> HudCell(formatBalance(raw), "L/R %", balanceColor(raw))
-
-            HudFieldId.DISTANCE -> {
-                val m = raw?.values?.get(DataType.Field.DISTANCE)
-                HudCell(formatDistance(m, imperial), if (imperial) "mi" else "km", HudColor.WHITE)
-            }
-
-            HudFieldId.ELAPSED_TIME -> {
-                val ms = raw?.values?.get(DataType.Field.ELAPSED_TIME)
-                HudCell(formatDuration(ms), "", HudColor.WHITE)
-            }
-
-            HudFieldId.GEARS -> HudCell(formatGears(raw), "T", HudColor.WHITE)
         }
     }
 
-    // Power zones by %FTP, 7-step palette:
-    //   Z0 <45% cyan · Z1 45-55% white · Z2 55-75% green · Z3 75-90% yellow ·
-    //   Z4 90-105% orange · Z5 105-120% red · Z6+ ≥120% purple.
-    private fun powerColor(watts: Double?, ftp: Int): HudColor {
+    // Power colour: map %FTP into the rider's editable [DEFAULT_POWER_ZONES] bands (the 7-colour
+    // cyan→purple ramp). Boundaries come from settings; the colour-per-index is fixed.
+    private fun powerColor(watts: Double?, ftp: Int, zones: List<ZoneBand>): HudColor {
         if (watts == null || ftp <= 0) return HudColor.WHITE
-        val pct = watts / ftp
-        return when {
-            pct >= 1.20 -> HudColor.PURPLE
-            pct >= 1.05 -> HudColor.RED
-            pct >= 0.90 -> HudColor.ORANGE
-            pct >= 0.75 -> HudColor.YELLOW
-            pct >= 0.55 -> HudColor.GREEN
-            pct >= 0.45 -> HudColor.WHITE
-            else -> HudColor.CYAN
-        }
+        val pct = (watts / ftp) * 100.0
+        val idx = zoneIndexByPct(zones, pct)
+        return POWER_ZONE_COLORS.getOrElse(idx) { HudColor.WHITE }
     }
 
-    // HR zones by %MaxHR — same colour order as power, with HR-appropriate thresholds.
-    private fun hrColor(bpm: Double?, maxHr: Int): HudColor {
+    // HR colour: map %MaxHR into the editable [DEFAULT_HR_ZONES] (5-colour Coggan, no Z0).
+    private fun hrColor(bpm: Double?, maxHr: Int, zones: List<ZoneBand>): HudColor {
         if (bpm == null || maxHr <= 0) return HudColor.WHITE
-        val pct = bpm / maxHr
-        return when {
-            pct >= 1.00 -> HudColor.PURPLE
-            pct >= 0.90 -> HudColor.RED
-            pct >= 0.80 -> HudColor.ORANGE
-            pct >= 0.70 -> HudColor.YELLOW
-            pct >= 0.60 -> HudColor.GREEN
-            pct >= 0.50 -> HudColor.WHITE
-            else -> HudColor.CYAN
-        }
+        val pct = (bpm / maxHr) * 100.0
+        val idx = zoneIndexByPct(zones, pct)
+        return HR_ZONE_COLORS.getOrElse(idx) { HudColor.WHITE }
     }
 
     /**
@@ -422,18 +537,52 @@ object FieldFormat {
     }
 
     /**
-     * Render the [DataType.Type.SHIFTING_GEARS] field as "front/rear" teeth (e.g. "50/14") —
-     * the SDK exposes [Field.SHIFTING_FRONT_GEAR_TEETH] and [Field.SHIFTING_REAR_GEAR_TEETH]
-     * sourced from the rider's saved gearing info. Falls back to position-style "F/R" (e.g.
-     * "2/8") if teeth aren't configured, then "--/--" if nothing's reported.
+     * Render the [DataType.Type.SHIFTING_GEARS] field as (value, unit). Teeth are resolved in
+     * priority order:
+     *   1. directly from the sensor ([Field.SHIFTING_FRONT_GEAR_TEETH] / `..._REAR_GEAR_TEETH`),
+     *      which electronic groups (SRAM AXS, Di2) report;
+     *   2. otherwise mapped from the reported gear *position* via the rider's configured drivetrain
+     *      ([gear]) — but only if that drivetrain matches the bike (its ring/cog count equals the
+     *      sensor's reported max). This is the "datasheet" lookup.
+     * When teeth can't be resolved (no/ mismatched config), we fall back to the gear *position*
+     * number "F/R" exactly as before. [gear].display picks teeth / ratio / inches.
      */
-    private fun formatGears(point: DataPoint?): String {
-        if (point == null) return "--/--"
-        val frontTeeth = point.values[DataType.Field.SHIFTING_FRONT_GEAR_TEETH]?.roundToInt()
-        val rearTeeth = point.values[DataType.Field.SHIFTING_REAR_GEAR_TEETH]?.roundToInt()
-        if (frontTeeth != null && rearTeeth != null) return "$frontTeeth/$rearTeeth"
+    private fun formatGears(point: DataPoint?, gear: GearLayout): Pair<String, String> {
+        if (point == null) return "--/--" to ""
         val frontPos = point.values[DataType.Field.SHIFTING_FRONT_GEAR]?.roundToInt()
         val rearPos = point.values[DataType.Field.SHIFTING_REAR_GEAR]?.roundToInt()
-        return if (frontPos != null && rearPos != null) "$frontPos/$rearPos" else "--/--"
+        val frontMax = point.values[DataType.Field.SHIFTING_FRONT_GEAR_MAX]?.roundToInt()
+        val rearMax = point.values[DataType.Field.SHIFTING_REAR_GEAR_MAX]?.roundToInt()
+
+        // Gear position 1 is the leftmost cog: smallest chainring up front, largest cog at the rear.
+        val frontTeeth = point.values[DataType.Field.SHIFTING_FRONT_GEAR_TEETH]?.roundToInt()
+            ?: teethFromPosition(gear.front, frontPos, frontMax, largestFirst = false)
+        val rearTeeth = point.values[DataType.Field.SHIFTING_REAR_GEAR_TEETH]?.roundToInt()
+            ?: teethFromPosition(gear.rear, rearPos, rearMax, largestFirst = true)
+
+        if (frontTeeth != null && rearTeeth != null && rearTeeth > 0) {
+            return when (gear.display) {
+                "ratio" -> "%.2f".format(frontTeeth.toDouble() / rearTeeth) to ""
+                // Gear inches ≈ ratio × wheel diameter (700c ≈ 27").
+                "inches" -> "${(frontTeeth.toDouble() / rearTeeth * 27.0).roundToInt()}" to "in"
+                else -> "$frontTeeth/$rearTeeth" to "T"
+            }
+        }
+        // Fallback: the gear position number, as before.
+        return if (frontPos != null && rearPos != null) "$frontPos/$rearPos" to "" else "--/--" to ""
+    }
+
+    /**
+     * Map a 1-based gear [pos] to a tooth count using the configured [teeth] list. Returns null
+     * ("configured one isn't found") when there's no config, the position is out of range, or the
+     * configured ring/cog count disagrees with the sensor's reported [max] — i.e. the saved
+     * drivetrain doesn't match the bike. Position 1 is the leftmost cog: [largestFirst] = false for
+     * chainrings (1 = smallest ring), true for the cassette (1 = largest cog).
+     */
+    private fun teethFromPosition(teeth: List<Int>, pos: Int?, max: Int?, largestFirst: Boolean): Int? {
+        if (teeth.isEmpty() || pos == null || pos < 1) return null
+        if (max != null && max != teeth.size) return null
+        val ordered = if (largestFirst) teeth.sortedDescending() else teeth.sorted()
+        return ordered.getOrNull(pos - 1)
     }
 }

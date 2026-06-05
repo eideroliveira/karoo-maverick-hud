@@ -36,6 +36,13 @@ object GlassesLinkState {
  */
 object HudState {
     val snapshot = MutableStateFlow(HudSnapshot.empty)
+
+    /**
+     * A preview snapshot pushed by the open settings activity so the rider sees their config
+     * live on the glasses while editing. Non-null overrides the ride pipeline; cleared (null)
+     * when settings closes. [MaverickBridge] honours it.
+     */
+    val previewSnapshot = MutableStateFlow<HudSnapshot?>(null)
 }
 
 /**
@@ -84,13 +91,30 @@ class MaverickBridge(
         hudScreen.onTouchPad = ::handleTouch
         startConnectionLoop()
         startPageCycler()
+        startPreviewObserver()
     }
 
     fun update(snapshot: HudSnapshot) {
+        // While the settings app is pushing a live preview, it owns the glasses — ignore the
+        // ride pipeline so the two don't fight over the screen.
+        if (HudState.previewSnapshot.value != null) return
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
         publish(snapshot.copy(pageIndex = pageIndex, battery = glassesBattery))
         mountScreenIfNeeded()
+    }
+
+    /** Mirror the settings app's live preview onto the glasses while it's open. */
+    private fun startPreviewObserver() {
+        scope.launch {
+            HudState.previewSnapshot.collect { preview ->
+                if (preview != null) {
+                    publish(preview.copy(battery = glassesBattery))
+                    mountScreenIfNeeded()
+                }
+                // On clear (null) we leave the last frame; the next ride-pipeline update restores it.
+            }
+        }
     }
 
     /** Push a snapshot to the glasses and mirror it for the Karoo data field. */
@@ -149,7 +173,7 @@ class MaverickBridge(
         ctrlBrightness = (ctrlBrightness + delta).coerceIn(0, 100)
         ctrlAuto = false
         runCatching {
-            Evs.instance().display().autoBrightness().enable(false)
+            Evs.instance().display().autoBrightness().enable(isEnabled = false)
             Evs.instance().display().setBrightness(ctrlBrightness.toShort())
         }.onFailure { Timber.w(it, "set brightness") }
         pushControl()
@@ -198,7 +222,7 @@ class MaverickBridge(
                     }
                     // Glasses battery for the HUD's top-right corner; stamped onto snapshots in update().
                     glassesBattery = if (connected) {
-                        runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in 0..100 }
+                        runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in (0..100) }
                     } else {
                         null
                     }
@@ -213,7 +237,7 @@ class MaverickBridge(
                     }
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
-                    if (pairedId != null && !connected && !comm.isConnecting()) {
+                    if ((pairedId != null) && !connected && !comm.isConnecting()) {
                         // The SDK can lose its configured device across process restarts; restore
                         // it from our prefs so a ride reliably reconnects instead of sitting idle.
                         if (!comm.hasConfiguredDevice()) {
@@ -251,6 +275,7 @@ class MaverickBridge(
             while (isActive) {
                 val cfg = configState.value
                 delay(cfg.autoCycleMs.coerceAtLeast(1_000L))
+                if (HudState.previewSnapshot.value != null) continue // preview owns paging
                 if (configState.value.pageMode == PageMode.AUTO) {
                     val count = lastSnapshot.pages.size
                     if (count > 1) {

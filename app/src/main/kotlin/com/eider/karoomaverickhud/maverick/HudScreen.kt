@@ -7,11 +7,14 @@ import UIKit.app.data.Align
 import UIKit.app.data.EvsColor
 import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
+import UIKit.app.resources.ImgSrc
+import UIKit.widgets.Image
 import UIKit.widgets.Rect
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
 import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
+import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
 
@@ -29,6 +32,8 @@ class HudScreen : Screen(420f, 150f) {
     private val screenW = 420f
     private val leftX = 8f
     private val rightX = screenW - 8f
+    private val iconW = 26f
+    private val iconGap = 4f
 
     // Centre control-window geometry (a bordered box with time/signal/battery + a brightness slider).
     private val boxX = 50f
@@ -41,7 +46,7 @@ class HudScreen : Screen(420f, 150f) {
     private val sliderY = 94f // baseline for the brightness status line
 
     /** Per-cell vertical placement and which edge it hugs; X is computed per-frame from text width. */
-    private data class Slot(val isRight: Boolean, val valueY: Float, val labelY: Float)
+    private data class Slot(val isRight: Boolean, val valueY: Float, val labelY: Float, val iconY: Float)
 
     /**
      * Slots ordered by field count. The first four fields always take the four corners; a 5th
@@ -49,7 +54,7 @@ class HudScreen : Screen(420f, 150f) {
      */
     private fun slotsFor(count: Int): Array<Slot> {
         fun row(isRight: Boolean, valueY: Float, gap: Float) =
-            Slot(isRight, valueY = valueY, labelY = valueY + gap)
+            Slot(isRight, valueY = valueY, labelY = valueY + gap, iconY = valueY + gap - 3f)
         return if (count <= 4) {
             val gap = 22f
             arrayOf(
@@ -73,10 +78,22 @@ class HudScreen : Screen(420f, 150f) {
 
     private val values = Array(cellCount) { Text() }
     private val units = Array(cellCount) { Text() }
+    private val icons = Array(cellCount) { Image() }
     private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
     private val clockText = Text() // time of day (shown inside the control window)
     private val batteryText = Text() // glasses battery % (shown inside the control window)
+
+    // One ImgSrc per glyph (each gets its own glasses image slot). Drawn only when the rider
+    // enables HUD icons (HudSnapshot.showIcons).
+    private val imgPower = ImgSrc("ic_power.png", ImgSrc.Slot.s1)
+    private val imgSpeed = ImgSrc("ic_speed.png", ImgSrc.Slot.s2)
+    private val imgHeart = ImgSrc("ic_hr.png", ImgSrc.Slot.s3)
+    private val imgCadence = ImgSrc("ic_cadence.png", ImgSrc.Slot.s4)
+    private val imgTime = ImgSrc("ic_time.png", ImgSrc.Slot.s5)
+    private val imgDistance = ImgSrc("ic_distance.png", ImgSrc.Slot.s6)
+    private val imgBalance = ImgSrc("ic_balance.png", ImgSrc.Slot.s7)
+    private val currentIcon = arrayOfNulls<HudIcon>(cellCount) // avoid redundant setResource
 
     // Centre control-window widgets.
     private val ctrlBox = Rect()
@@ -113,6 +130,9 @@ class HudScreen : Screen(420f, 150f) {
         // (per the brief: "value at unit's size, unit smaller"). Smaller than Small isn't
         // available without a custom font upload, which we don't pay for here.
         for (i in 0 until cellCount) {
+            icons[i]
+                .setVisibility(false)
+                .addTo(this)
             values[i]
                 .setText("")
                 .setResource(Font.StockFont.Small)
@@ -227,13 +247,13 @@ class HudScreen : Screen(420f, 150f) {
         val count = page.size.coerceIn(1, cellCount)
         if (count != layoutCount) applyCount(count)
         for (i in 0 until cellCount) {
-            if (i < count) layoutCell(i, slots[i], page.getOrNull(i)) else blankCell(i)
+            if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
     }
 
-    /** Render one cell: value on top, unit/label below, both tinted by the zone colour. */
-    private fun layoutCell(i: Int, slot: Slot, cell: HudCell?) {
+    /** Render one cell: value on top, unit/label (+ optional icon) below, tinted by the zone colour. */
+    private fun layoutCell(i: Int, slot: Slot, cell: HudCell?, showIcons: Boolean) {
         val color = colorRgba(cell?.color ?: HudColor.WHITE)
         val align = if (slot.isRight) Align.right else Align.left
         val anchorX = if (slot.isRight) rightX else leftX
@@ -241,8 +261,34 @@ class HudScreen : Screen(420f, 150f) {
         values[i].setText(cell?.value ?: "").setForegroundColor(color)
         values[i].setTextAlign(align).setXY(anchorX, slot.valueY)
 
-        units[i].setText(cell?.units.orEmpty()).setForegroundColor(color)
+        val labelText = cell?.units.orEmpty()
+        units[i].setText(labelText).setForegroundColor(color)
         units[i].setTextAlign(align).setXY(anchorX, slot.labelY)
+
+        val icon = cell?.icon
+        if (!showIcons || icon == null) {
+            icons[i].setVisibility(false)
+            currentIcon[i] = null
+        } else {
+            if (currentIcon[i] != icon) {
+                icons[i].setResource(imgSrcFor(icon))
+                currentIcon[i] = icon
+            }
+            // Icon sits on the inner side of the label: after it on the left, before it on the right.
+            val labelW = if (labelText.isEmpty()) 0f else units[i].getMeasuredContentWidth()
+            val iconX = if (slot.isRight) (rightX - labelW) - iconGap - iconW else leftX + labelW + iconGap
+            icons[i].setForegroundColor(color).setXY(iconX, slot.iconY).setVisibility(true)
+        }
+    }
+
+    private fun imgSrcFor(icon: HudIcon): ImgSrc = when (icon) {
+        HudIcon.POWER -> imgPower
+        HudIcon.SPEED -> imgSpeed
+        HudIcon.HEART -> imgHeart
+        HudIcon.CADENCE -> imgCadence
+        HudIcon.TIME -> imgTime
+        HudIcon.DISTANCE -> imgDistance
+        HudIcon.BALANCE -> imgBalance
     }
 
     /** Draw or hide the centre control window from the latest [setControl] state + snapshot. */
@@ -276,6 +322,8 @@ class HudScreen : Screen(420f, 150f) {
     private fun blankCell(i: Int) {
         values[i].setText("")
         units[i].setText("")
+        icons[i].setVisibility(false)
+        currentIcon[i] = null
     }
 
     private fun colorRgba(color: HudColor): Int = when (color) {

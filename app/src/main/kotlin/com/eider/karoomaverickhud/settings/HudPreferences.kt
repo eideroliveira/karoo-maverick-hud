@@ -9,15 +9,34 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.eider.karoomaverickhud.extension.HudFieldId
+import com.eider.karoomaverickhud.extension.DEFAULT_HR_ZONES
+import com.eider.karoomaverickhud.extension.DEFAULT_POWER_ZONES
 import com.eider.karoomaverickhud.extension.MAX_ROWS
 import com.eider.karoomaverickhud.extension.MIN_ROWS
+import com.eider.karoomaverickhud.extension.ZoneBand
+import io.hammerhead.karooext.models.DataType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 enum class PageMode { AUTO, FOLLOW_KAROO, MANUAL }
+
+/**
+ * Drivetrain setup for the GEAR field. [source] is "auto" (read live from SRAM AXS / Shimano Di2
+ * during the ride) or "manual" (hand-entered for mechanical groupsets). [front]/[rear] are teeth
+ * counts. [display] picks the HUD readout style: "gear" (front·rear position), "ratio", "inches".
+ */
+@Serializable
+data class GearConfig(
+    val source: String = "auto",
+    val drivetrainId: String? = "sram_red_1033",
+    val front: List<Int> = listOf(48, 35),
+    val rear: List<Int> = listOf(10, 11, 12, 13, 14, 15, 17, 19, 21, 24, 28, 33),
+    val showField: Boolean = true,
+    val display: String = "teeth", // "teeth" (50/14) | "ratio" | "inches" (legacy "gear" == teeth)
+)
 
 data class HudConfig(
     val maverickDeviceId: String?,
@@ -37,12 +56,21 @@ data class HudConfig(
     val ftp: Int,
     val maxHr: Int,
     val idealCadence: Int,
+    /** Editable zone bands (boundaries as % of FTP / MaxHR); drive the HUD value coloring. */
+    val ftpZones: List<ZoneBand>,
+    val hrZones: List<ZoneBand>,
+    /** Drivetrain setup for the GEAR field. */
+    val gear: GearConfig,
+    /** Whether the glasses show the time-of-day clock in the corner. */
+    val showClock: Boolean,
+    /** Whether the glasses draw each data field's icon next to its unit/label. */
+    val showIcons: Boolean,
 ) {
     companion object {
         /** Seeded layout matching the original hard-coded two-page HUD. */
         val DEFAULT_PAGES: List<List<String>> = listOf(
-            listOf(HudFieldId.POWER, HudFieldId.CADENCE, HudFieldId.LR_BALANCE, HudFieldId.SPEED).map { it.dataTypeId },
-            listOf(HudFieldId.DISTANCE, HudFieldId.AVG_SPEED, HudFieldId.HEART_RATE, HudFieldId.ELAPSED_TIME).map { it.dataTypeId },
+            listOf(DataType.Type.POWER, DataType.Type.CADENCE, DataType.Type.PEDAL_POWER_BALANCE, DataType.Type.SPEED),
+            listOf(DataType.Type.DISTANCE, DataType.Type.AVERAGE_SPEED, DataType.Type.HEART_RATE, DataType.Type.ELAPSED_TIME),
         )
 
         val DEFAULT = HudConfig(
@@ -57,6 +85,11 @@ data class HudConfig(
             ftp = 200,
             maxHr = 185,
             idealCadence = 90,
+            ftpZones = DEFAULT_POWER_ZONES,
+            hrZones = DEFAULT_HR_ZONES,
+            gear = GearConfig(),
+            showClock = true,
+            showIcons = false,
         )
     }
 }
@@ -75,6 +108,11 @@ object HudPreferences {
     private val KEY_FTP = intPreferencesKey("ftp")
     private val KEY_MAX_HR = intPreferencesKey("max_hr")
     private val KEY_IDEAL_CADENCE = intPreferencesKey("ideal_cadence")
+    private val KEY_FTP_ZONES = stringPreferencesKey("ftp_zones_json")
+    private val KEY_HR_ZONES = stringPreferencesKey("hr_zones_json")
+    private val KEY_GEAR = stringPreferencesKey("gear_json")
+    private val KEY_SHOW_CLOCK = booleanPreferencesKey("show_clock")
+    private val KEY_SHOW_ICONS = booleanPreferencesKey("show_icons")
 
     fun flow(context: Context): Flow<HudConfig> = context.dataStore.data.map { prefs ->
         HudConfig(
@@ -90,6 +128,15 @@ object HudPreferences {
             ftp = prefs[KEY_FTP] ?: HudConfig.DEFAULT.ftp,
             maxHr = prefs[KEY_MAX_HR] ?: HudConfig.DEFAULT.maxHr,
             idealCadence = prefs[KEY_IDEAL_CADENCE] ?: HudConfig.DEFAULT.idealCadence,
+            // Fall back to the current default whenever the saved band count differs (e.g. after
+            // the power model changed from 6 to 7 zones) so the colour mapping stays in lockstep.
+            ftpZones = prefs[KEY_FTP_ZONES]?.let { decodeZones(it) }
+                ?.takeIf { it.size == HudConfig.DEFAULT.ftpZones.size } ?: HudConfig.DEFAULT.ftpZones,
+            hrZones = prefs[KEY_HR_ZONES]?.let { decodeZones(it) }
+                ?.takeIf { it.size == HudConfig.DEFAULT.hrZones.size } ?: HudConfig.DEFAULT.hrZones,
+            gear = prefs[KEY_GEAR]?.let { decodeGear(it) } ?: HudConfig.DEFAULT.gear,
+            showClock = prefs[KEY_SHOW_CLOCK] ?: HudConfig.DEFAULT.showClock,
+            showIcons = prefs[KEY_SHOW_ICONS] ?: HudConfig.DEFAULT.showIcons,
         )
     }
 
@@ -103,6 +150,42 @@ object HudPreferences {
             it[KEY_MAX_HR] = maxHr
             it[KEY_IDEAL_CADENCE] = idealCadence
         }
+    }
+
+    suspend fun setFtp(context: Context, ftp: Int) {
+        context.dataStore.edit { it[KEY_FTP] = ftp }
+    }
+
+    suspend fun setMaxHr(context: Context, maxHr: Int) {
+        context.dataStore.edit { it[KEY_MAX_HR] = maxHr }
+    }
+
+    suspend fun setIdealCadence(context: Context, idealCadence: Int) {
+        context.dataStore.edit { it[KEY_IDEAL_CADENCE] = idealCadence }
+    }
+
+    suspend fun setFtpZones(context: Context, zones: List<ZoneBand>) {
+        context.dataStore.edit { it[KEY_FTP_ZONES] = Json.encodeToString(zones) }
+    }
+
+    suspend fun setHrZones(context: Context, zones: List<ZoneBand>) {
+        context.dataStore.edit { it[KEY_HR_ZONES] = Json.encodeToString(zones) }
+    }
+
+    suspend fun setGear(context: Context, gear: GearConfig) {
+        context.dataStore.edit { it[KEY_GEAR] = Json.encodeToString(gear) }
+    }
+
+    suspend fun setShowClock(context: Context, show: Boolean) {
+        context.dataStore.edit { it[KEY_SHOW_CLOCK] = show }
+    }
+
+    suspend fun setShowIcons(context: Context, show: Boolean) {
+        context.dataStore.edit { it[KEY_SHOW_ICONS] = show }
+    }
+
+    suspend fun setAutoCycleMs(context: Context, ms: Long) {
+        context.dataStore.edit { it[KEY_AUTO_CYCLE_MS] = ms }
     }
 
     suspend fun setPairedDevice(context: Context, id: String?, name: String?) {
@@ -126,4 +209,10 @@ object HudPreferences {
 
     private fun decodePages(json: String): List<List<String>>? =
         runCatching { Json.decodeFromString<List<List<String>>>(json) }.getOrNull()
+
+    private fun decodeZones(json: String): List<ZoneBand>? =
+        runCatching { Json.decodeFromString<List<ZoneBand>>(json) }.getOrNull()
+
+    private fun decodeGear(json: String): GearConfig? =
+        runCatching { Json.decodeFromString<GearConfig>(json) }.getOrNull()
 }
