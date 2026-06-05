@@ -152,7 +152,7 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.HEART_RATE, "HR", FieldKind.HR, HudIcon.HEART, zone = true, valueField = DataType.Field.HEART_RATE),
     FieldSpec(DataType.Type.SPEED, "SPEED", FieldKind.SPEED, HudIcon.SPEED, valueField = DataType.Field.SPEED),
     FieldSpec(DataType.Type.DISTANCE, "DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, valueField = DataType.Field.DISTANCE),
-    FieldSpec(DataType.Type.PEDAL_POWER_BALANCE, "L/R", FieldKind.BALANCE, HudIcon.BALANCE),
+    FieldSpec(DataType.Type.PEDAL_POWER_BALANCE, "L/R %", FieldKind.BALANCE, HudIcon.BALANCE),
     FieldSpec(DataType.Type.SHIFTING_GEARS, "GEAR", FieldKind.GEARS),
     // ---- averages ----
     FieldSpec(DataType.Type.AVERAGE_POWER, "AVG POWER", FieldKind.POWER, HudIcon.POWER, zone = true, suffix = "avg"),

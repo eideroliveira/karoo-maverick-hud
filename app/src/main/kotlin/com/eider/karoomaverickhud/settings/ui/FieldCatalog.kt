@@ -55,8 +55,8 @@ private fun uiUnit(spec: FieldSpec): String {
     spec.unit?.let { return it }
     val base = when (spec.kind) {
         FieldKind.POWER -> "W"; FieldKind.HR -> "bpm"; FieldKind.CADENCE -> "rpm"
-        FieldKind.SPEED -> "km/h"; FieldKind.DISTANCE -> "km"; FieldKind.BALANCE -> "%"
-        else -> ""
+        FieldKind.SPEED -> "km/h"; FieldKind.DISTANCE -> "km"
+        else -> "" // BALANCE: the "L/R %" label is the unit; avoid a redundant "· %"
     }
     return if (spec.suffix.isEmpty()) base else "$base ${spec.suffix}"
 }
