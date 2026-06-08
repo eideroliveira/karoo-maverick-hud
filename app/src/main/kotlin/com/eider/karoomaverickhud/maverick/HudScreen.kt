@@ -5,6 +5,7 @@ package com.eider.karoomaverickhud.maverick
 import UIKit.app.Screen
 import UIKit.app.data.Align
 import UIKit.app.data.EvsColor
+import UIKit.app.data.EvsColors
 import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
 import UIKit.app.resources.ImgSrc
@@ -331,9 +332,14 @@ class HudScreen : Screen(420f, 150f) {
         HudColor.GREEN -> EvsColor.Green.rgba
         HudColor.YELLOW -> EvsColor.Yellow.rgba
         HudColor.ORANGE -> EvsColor.Orange.rgba
-        HudColor.RED -> EvsColor.Red.rgba
-        HudColor.PURPLE -> EvsColor.Purple.rgba
+        HudColor.RED -> LIGHT_RED_RGBA           // EvsColor.Red renders too dim on LCOS in daylight
+        HudColor.PURPLE -> PINK_RGBA             // EvsColor.Purple renders too dim on LCOS in daylight
         HudColor.CYAN -> EvsColor.Cyan.rgba
+    }
+
+    companion object {
+        private val LIGHT_RED_RGBA = EvsColors.fromRgb(0xFF, 0x7B, 0x7B)
+        private val PINK_RGBA = EvsColors.fromRgb(0xFF, 0x60, 0xB0)
     }
 
     override fun onTouch(touch: TouchDirection) {

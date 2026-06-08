@@ -45,8 +45,8 @@ object K {
     val zGreen = Color(0xFF36D85F)
     val zYellow = Color(0xFFFFD60A)        // cadence drift (no CSS token; matches HUD yellow)
     val zOrange = Color(0xFFFF9F0A)
-    val zRed = Color(0xFFFF453A)
-    val zPurple = Color(0xFFC265F2)
+    val zRed = Color(0xFFFF7B7B)           // light red — was dim on LCOS
+    val zPurple = Color(0xFFFF60B0)        // pink — was dim on LCOS
     val zBlue = Color(0xFF2E8DFF)
     val zCyan = Color(0xFF34D2E0)          // power Z0 (sub-recovery)
 
