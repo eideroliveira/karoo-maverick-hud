@@ -127,17 +127,20 @@ private fun SettingsRoot(autoPair: Boolean) {
         }
     }
 
-    // Glasses-control readouts: read ONCE when the link comes up (polling these SDK getters
-    // destabilises the BLE sync). Each control action updates local state directly afterwards.
+    // Glasses-control readouts. Brightness/auto are observed off [GlassesLinkState] which the
+    // bridge's connection loop keeps live; displayOn/centerX/Y are read once on link-up plus on
+    // resume (so on-bike temple-pad changes show up when the rider opens settings).
     var displayOn by remember { mutableStateOf(true) }
-    var brightness by remember { mutableStateOf(0) }
     var centerX by remember { mutableStateOf(0) }
     var centerY by remember { mutableStateOf(0) }
-    LaunchedEffect(linkConnected) {
+    val brightnessLive by com.eider.karoomaverickhud.maverick.GlassesLinkState.brightness.collectAsState()
+    val autoBrightness by com.eider.karoomaverickhud.maverick.GlassesLinkState.autoBrightness.collectAsState()
+    val brightness = brightnessLive ?: 0
+    var settingsResumeTick by remember { mutableStateOf(0) }
+    LaunchedEffect(linkConnected, settingsResumeTick) {
         if (linkConnected) runCatching {
             val evs = Evs.instance()
             displayOn = evs.display().isDisplayOn()
-            brightness = evs.display().getBrightness().toInt()
             centerX = evs.screens().getRenderingCenterX().toInt()
             centerY = evs.screens().getRenderingCenterY().toInt()
         }
@@ -206,14 +209,19 @@ private fun SettingsRoot(autoPair: Boolean) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) runCatching {
-                val comm = Evs.instance().comm()
-                if (comm.hasConfiguredDevice()) {
-                    val id = comm.getDeviceId()
-                    val name = comm.getDeviceName()
-                    if (!id.isNullOrEmpty() && id != cfg.maverickDeviceId) scope.launch { HudPreferences.setPairedDevice(ctx, id, name) }
-                }
-            }.onFailure { Timber.w(it, "Mirroring configured device failed") }
+            if (event == Lifecycle.Event.ON_RESUME) {
+                // Re-key the glasses-control LaunchedEffect so displayOn/centerX/Y get re-read
+                // after on-bike temple-pad changes (brightness/auto already stream live).
+                settingsResumeTick++
+                runCatching {
+                    val comm = Evs.instance().comm()
+                    if (comm.hasConfiguredDevice()) {
+                        val id = comm.getDeviceId()
+                        val name = comm.getDeviceName()
+                        if (!id.isNullOrEmpty() && id != cfg.maverickDeviceId) scope.launch { HudPreferences.setPairedDevice(ctx, id, name) }
+                    }
+                }.onFailure { Timber.w(it, "Mirroring configured device failed") }
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -236,7 +244,8 @@ private fun SettingsRoot(autoPair: Boolean) {
                 "pages" -> PagesScreen(cfg, ctx, scope, values)
                 "glasses" -> GlassesScreen(
                     hasDevice = hasDevice, connected = linkConnected, deviceName = deviceName, battery = null,
-                    displayOn = displayOn, brightness = brightness, centerX = centerX, centerY = centerY, gpsBlocked = gpsBlocked,
+                    displayOn = displayOn, brightness = brightness, autoBrightness = autoBrightness,
+                    centerX = centerX, centerY = centerY, gpsBlocked = gpsBlocked,
                     onPair = triggerPair, onConnect = triggerConnect,
                     onDisconnect = { runCatching { Evs.instance().comm().disconnect() }.onFailure { Timber.w(it, "disconnect") } },
                     onUnpair = {
@@ -252,8 +261,22 @@ private fun SettingsRoot(autoPair: Boolean) {
                     },
                     onBrightness = { v ->
                         val nv = v.coerceIn(0, 100)
-                        runCatching { Evs.instance().display().setBrightness(nv.toShort()) }.onFailure { Timber.w(it, "brightness") }
-                        brightness = nv
+                        // Force auto off before writing — otherwise the firmware keeps
+                        // overriding the manual level and the slider silently fails to "stick".
+                        runCatching {
+                            Evs.instance().display().autoBrightness().enable(isEnabled = false)
+                            Evs.instance().display().setBrightness(nv.toShort())
+                            Timber.d("settings setBrightness($nv) readback=${runCatching { Evs.instance().display().getBrightness().toInt() }.getOrNull()}")
+                        }.onFailure { Timber.w(it, "brightness") }
+                        com.eider.karoomaverickhud.maverick.GlassesLinkState.brightness.value = nv
+                        com.eider.karoomaverickhud.maverick.GlassesLinkState.autoBrightness.value = false
+                    },
+                    onAutoBrightness = { on ->
+                        runCatching {
+                            Evs.instance().display().autoBrightness().enable(isEnabled = on)
+                            Timber.d("settings autoBrightness.enable($on) readback=${runCatching { Evs.instance().display().autoBrightness().isEnabled() }.getOrNull()}")
+                        }.onFailure { Timber.w(it, "auto-brightness") }
+                        com.eider.karoomaverickhud.maverick.GlassesLinkState.autoBrightness.value = on
                     },
                     onCenterX = { v ->
                         runCatching { Evs.instance().screens().setRenderingCenterX(v.toFloat()) }.onFailure { Timber.w(it, "centerX") }

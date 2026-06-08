@@ -159,23 +159,27 @@ class MaverickBridge(
     }
 
     /**
-     * Temple-pad gestures. A single tap toggles the centre control window. While it's open,
-     * forward/back adjust brightness and a long-tap toggles auto-brightness; while it's closed,
-     * forward/back flip the page (any mode — AUTO keeps cycling from wherever they land).
+     * Temple-pad gestures.
+     *  - Closed: long-tap opens the control window; forward/back flip pages (in any page mode —
+     *    AUTO keeps cycling from wherever they land). A bare tap is swallowed so accidental
+     *    pad touches don't bring up the window mid-ride.
+     *  - Open: backward (read as "swipe down") dismisses; forward = brightness +10;
+     *    tap = brightness −10; long-tap toggles auto-brightness.
      */
     private fun handleTouch(direction: TouchDirection) {
+        Timber.d("touch=$direction controlOpen=$controlOpen bright=$ctrlBrightness auto=$ctrlAuto")
         if (controlOpen) {
             when (direction) {
-                TouchDirection.tap -> toggleControl()
+                TouchDirection.backward -> toggleControl()
                 TouchDirection.forward -> adjustBrightness(+10)
-                TouchDirection.backward -> adjustBrightness(-10)
+                TouchDirection.tap -> adjustBrightness(-10)
                 TouchDirection.longTap -> toggleAuto()
                 else -> {}
             }
             return
         }
         when (direction) {
-            TouchDirection.tap -> toggleControl()
+            TouchDirection.longTap -> toggleControl()
             TouchDirection.forward -> changePage(+1)
             TouchDirection.backward -> changePage(-1)
             else -> {}
@@ -195,6 +199,7 @@ class MaverickBridge(
             runCatching {
                 ctrlBrightness = Evs.instance().display().getBrightness().toInt()
                 ctrlAuto = Evs.instance().display().autoBrightness().isEnabled()
+                Timber.d("control open: read bright=$ctrlBrightness auto=$ctrlAuto")
             }.onFailure { Timber.w(it, "read brightness") }
         }
         pushControl()
@@ -204,16 +209,24 @@ class MaverickBridge(
         ctrlBrightness = (ctrlBrightness + delta).coerceIn(0, 100)
         ctrlAuto = false
         runCatching {
+            // Always force auto off first — the firmware will keep overriding our manual level
+            // otherwise (the bug the user hit: brightness wouldn't climb back to 100% with auto on).
             Evs.instance().display().autoBrightness().enable(isEnabled = false)
             Evs.instance().display().setBrightness(ctrlBrightness.toShort())
+            Timber.d("setBrightness($ctrlBrightness) → readback=${runCatching { Evs.instance().display().getBrightness().toInt() }.getOrNull()}")
         }.onFailure { Timber.w(it, "set brightness") }
+        GlassesLinkState.brightness.value = ctrlBrightness
+        GlassesLinkState.autoBrightness.value = false
         pushControl()
     }
 
     private fun toggleAuto() {
         ctrlAuto = !ctrlAuto
-        runCatching { Evs.instance().display().autoBrightness().enable(ctrlAuto) }
-            .onFailure { Timber.w(it, "toggle auto-brightness") }
+        runCatching {
+            Evs.instance().display().autoBrightness().enable(ctrlAuto)
+            Timber.d("autoBrightness.enable($ctrlAuto) → readback=${runCatching { Evs.instance().display().autoBrightness().isEnabled() }.getOrNull()}")
+        }.onFailure { Timber.w(it, "toggle auto-brightness") }
+        GlassesLinkState.autoBrightness.value = ctrlAuto
         pushControl()
     }
 

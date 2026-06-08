@@ -222,6 +222,7 @@ fun GlassesScreen(
     battery: Int?,
     displayOn: Boolean,
     brightness: Int,
+    autoBrightness: Boolean,
     centerX: Int,
     centerY: Int,
     gpsBlocked: Boolean,
@@ -231,6 +232,7 @@ fun GlassesScreen(
     onUnpair: () -> Unit,
     onDisplayOn: (Boolean) -> Unit,
     onBrightness: (Int) -> Unit,
+    onAutoBrightness: (Boolean) -> Unit,
     onCenterX: (Int) -> Unit,
     onCenterY: (Int) -> Unit,
     onConfigure: () -> Unit,
@@ -282,7 +284,19 @@ fun GlassesScreen(
                     KSwitch(displayOn, onDisplayOn)
                 }
                 KRow {
-                    KIconChip("sun"); Column(Modifier.weight(1f)) { KText("Brightness", color = K.text, size = 16.sp, weight = FontWeight.Medium) }
+                    KIconChip("brightness")
+                    Column(Modifier.weight(1f)) {
+                        KText("Auto-brightness", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                        KText("Adjusts to ambient light", color = K.text2, size = 12.5.sp)
+                    }
+                    KSwitch(autoBrightness, onAutoBrightness)
+                }
+                KRow {
+                    KIconChip("sun")
+                    Column(Modifier.weight(1f)) {
+                        KText("Brightness", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                        if (autoBrightness) KText("Auto on — adjusting turns it off", color = K.text2, size = 12.5.sp)
+                    }
                     KStepper(brightness, onBrightness, min = 0, max = 100, step = 10, unit = "%")
                 }
                 KRow {
