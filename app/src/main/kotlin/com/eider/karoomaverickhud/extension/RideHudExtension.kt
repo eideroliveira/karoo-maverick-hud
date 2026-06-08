@@ -44,13 +44,14 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var maverick: MaverickBridge
     private lateinit var rideStateFlow: StateFlow<RideState>
 
-    // In-ride field that mirrors the glasses HUD. Reads the process-wide HudState/GlassesLinkState,
-    // so it needs no reference to [maverick]; a tap broadcasts [ACTION_NEXT_PAGE] back to us.
+    // In-ride field that shows Maverick connection status and current brightness. Reads the
+    // process-wide GlassesLinkState, so it needs no reference to [maverick]; a tap broadcasts
+    // [ACTION_CYCLE_BRIGHTNESS] back to us.
     override val types by lazy { listOf(GlassesDataType(extension)) }
 
-    private val nextPageReceiver = object : BroadcastReceiver() {
+    private val cycleBrightnessReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (::maverick.isInitialized) maverick.nextPage()
+            if (::maverick.isInitialized) maverick.cycleBrightness()
         }
     }
 
@@ -72,8 +73,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         ContextCompat.registerReceiver(
             this,
-            nextPageReceiver,
-            IntentFilter(ACTION_NEXT_PAGE),
+            cycleBrightnessReceiver,
+            IntentFilter(ACTION_CYCLE_BRIGHTNESS),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
@@ -98,7 +99,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
-        runCatching { unregisterReceiver(nextPageReceiver) }
+        runCatching { unregisterReceiver(cycleBrightnessReceiver) }
         scope.cancel()
         maverick.shutdown()
         karoo.disconnect()
@@ -106,8 +107,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     companion object {
-        /** Broadcast sent by a tap on the Karoo data field to advance the HUD page. */
-        const val ACTION_NEXT_PAGE = "com.eider.karoomaverickhud.NEXT_PAGE"
+        /** Broadcast sent by a tap on the Karoo data field to cycle glasses brightness. */
+        const val ACTION_CYCLE_BRIGHTNESS = "com.eider.karoomaverickhud.CYCLE_BRIGHTNESS"
     }
 
     /**
