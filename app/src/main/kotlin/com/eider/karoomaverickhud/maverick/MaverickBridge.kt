@@ -27,6 +27,10 @@ import timber.log.Timber
  */
 object GlassesLinkState {
     val connected = MutableStateFlow(value = false)
+    /** Current display brightness 0..100, null when disconnected/unknown. */
+    val brightness = MutableStateFlow<Int?>(value = null)
+    /** True when the glasses' auto-brightness is enabled (overrides the manual level). */
+    val autoBrightness = MutableStateFlow(value = false)
 }
 
 /**
@@ -124,8 +128,35 @@ class MaverickBridge(
         HudState.snapshot.value = s
     }
 
-    /** Advance to the next page — used by a single tap on the Karoo data field. */
-    fun nextPage() = changePage(+1)
+    /**
+     * Cycle the glasses' display brightness through 50% → 75% → 100% → auto → 50%.
+     * Used by a single tap on the Karoo data field. No-op while disconnected.
+     */
+    fun cycleBrightness() {
+        if (!_connectionState.value) return
+        val auto = runCatching { Evs.instance().display().autoBrightness().isEnabled() }.getOrElse { ctrlAuto }
+        val current = runCatching { Evs.instance().display().getBrightness().toInt() }.getOrElse { ctrlBrightness }
+        val (nextAuto, nextLevel) = when {
+            auto -> false to 50
+            current < 50 -> false to 50
+            current < 75 -> false to 75
+            current < 100 -> false to 100
+            else -> true to current
+        }
+        runCatching {
+            if (nextAuto) {
+                Evs.instance().display().autoBrightness().enable(isEnabled = true)
+            } else {
+                Evs.instance().display().autoBrightness().enable(isEnabled = false)
+                Evs.instance().display().setBrightness(nextLevel.toShort())
+            }
+        }.onFailure { Timber.w(it, "cycleBrightness failed") }
+        ctrlAuto = nextAuto
+        ctrlBrightness = nextLevel
+        GlassesLinkState.brightness.value = nextLevel
+        GlassesLinkState.autoBrightness.value = nextAuto
+        if (controlOpen) pushControl()
+    }
 
     /**
      * Temple-pad gestures. A single tap toggles the centre control window. While it's open,
@@ -225,6 +256,22 @@ class MaverickBridge(
                         runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in (0..100) }
                     } else {
                         null
+                    }
+                    // Brightness/auto mirror for the Karoo data field; cleared on disconnect.
+                    if (connected) {
+                        val b = runCatching { Evs.instance().display().getBrightness().toInt() }
+                            .getOrNull()?.takeIf { it in 0..100 }
+                        val a = runCatching { Evs.instance().display().autoBrightness().isEnabled() }
+                            .getOrDefault(false)
+                        if (b != null) {
+                            ctrlBrightness = b
+                            GlassesLinkState.brightness.value = b
+                        }
+                        ctrlAuto = a
+                        GlassesLinkState.autoBrightness.value = a
+                    } else {
+                        GlassesLinkState.brightness.value = null
+                        GlassesLinkState.autoBrightness.value = false
                     }
                     // Signal bars for the control window (BLE RSSI → 0..3).
                     if (connected) {
