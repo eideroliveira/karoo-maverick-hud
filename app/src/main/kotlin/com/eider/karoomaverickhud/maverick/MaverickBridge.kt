@@ -75,6 +75,12 @@ class MaverickBridge(
     @Volatile private var pageIndex: Int = 0
     @Volatile private var lastSnapshot: HudSnapshot = HudSnapshot.empty
 
+    // The last snapshot the ride pipeline produced (as opposed to a preview frame). Used to snap
+    // the glasses straight back to realtime when an open settings preview clears, so we don't sit
+    // on a stale demo frame waiting for the next pipeline tick (which may not come if the ride is
+    // paused and no sensors are emitting).
+    @Volatile private var lastRideSnapshot: HudSnapshot? = null
+
     // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
     @Volatile private var glassesBattery: Int? = null
 
@@ -104,7 +110,9 @@ class MaverickBridge(
         if (HudState.previewSnapshot.value != null) return
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        publish(snapshot.copy(pageIndex = pageIndex, battery = glassesBattery))
+        val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
+        lastRideSnapshot = stamped
+        publish(stamped)
         mountScreenIfNeeded()
     }
 
@@ -115,8 +123,15 @@ class MaverickBridge(
                 if (preview != null) {
                     publish(preview.copy(battery = glassesBattery))
                     mountScreenIfNeeded()
+                } else {
+                    // Preview cleared (settings backgrounded/closed): restore the last ride frame
+                    // immediately so the glasses snap back to realtime instead of holding the demo
+                    // frame until — or unless — the ride pipeline emits again.
+                    lastRideSnapshot?.let {
+                        publish(it.copy(battery = glassesBattery))
+                        mountScreenIfNeeded()
+                    }
                 }
-                // On clear (null) we leave the last frame; the next ride-pipeline update restores it.
             }
         }
     }
