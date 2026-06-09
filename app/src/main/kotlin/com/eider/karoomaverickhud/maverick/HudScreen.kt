@@ -55,19 +55,23 @@ class HudScreen : Screen(420f, 150f) {
      */
     private fun slotsFor(count: Int): Array<Slot> {
         fun row(isRight: Boolean, valueY: Float, gap: Float) =
-            Slot(isRight, valueY = valueY, labelY = valueY + gap, iconY = valueY + gap - 3f)
+            Slot(isRight, valueY = valueY, labelY = valueY + gap, iconY = valueY + gap - 4f)
         return if (count <= 4) {
-            val gap = 22f
+            // Big value face (~33px) stacked over a small unit (~18px): two roomy rows. The gap
+            // tucks the unit just under the digits; rows sit clear of the 150px top/bottom edges.
+            val gap = 30f
             arrayOf(
-                row(false, 18f, gap), row(true, 18f, gap),    // TL, TR
-                row(false, 102f, gap), row(true, 102f, gap),  // BL, BR
+                row(false, 14f, gap), row(true, 14f, gap),    // TL, TR
+                row(false, 88f, gap), row(true, 88f, gap),    // BL, BR
             )
         } else {
-            val gap = 22f
+            // Denser value face (~25px) over the same small unit, so three value+unit rows
+            // (3 × ~43px) still fit the 150px lens.
+            val gap = 25f
             arrayOf(
-                row(false, 4f, gap), row(true, 4f, gap),      // TL, TR
-                row(false, 112f, gap), row(true, 112f, gap),  // BL, BR
-                row(false, 58f, gap), row(true, 58f, gap),    // ML, MR (centre)
+                row(false, 6f, gap), row(true, 6f, gap),      // TL, TR
+                row(false, 102f, gap), row(true, 102f, gap),  // BL, BR
+                row(false, 54f, gap), row(true, 54f, gap),    // ML, MR (centre)
             )
         }
     }
@@ -80,6 +84,18 @@ class HudScreen : Screen(420f, 150f) {
     private val values = Array(cellCount) { Text() }
     private val units = Array(cellCount) { Text() }
     private val icons = Array(cellCount) { Image() }
+
+    // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
+    // assets/fonts. Each occupies its own glasses font slot. Values use a larger face than their
+    // unit labels; the value face also steps down on the denser 5–6 field (three-row) pages so
+    // value + unit still clear the 150px lens. The HxW token in each filename is parsed by the SDK
+    // to set the glyph dimensions, so the generated names are kept verbatim.
+    private val valueFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s1)
+    private val valueFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.25x18.2bpp.sifz", Font.Slot.s2)
+    private val unitFont = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
+
+    /** Big value face on the roomy ≤4-field (two-row) pages; the denser face on 5–6 field pages. */
+    private fun valueFontFor(count: Int): Font = if (count <= 4) valueFontBig else valueFontDense
     private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
     private val clockText = Text() // time of day (shown inside the control window)
@@ -127,22 +143,22 @@ class HudScreen : Screen(420f, 150f) {
     private fun UIElement.addTo(screen: Screen): UIElement = also { screen.add(it) }
 
     override fun onCreate() {
-        // EvsKit's stock font set is Small/Medium/Large only — we sit at Small for both lines
-        // (per the brief: "value at unit's size, unit smaller"). Smaller than Small isn't
-        // available without a custom font upload, which we don't pay for here.
+        // Values and units use custom Roboto Condensed faces (see the field declarations): the
+        // value face is larger than the unit, and steps down on denser pages via [valueFontFor].
+        // The remaining chrome (status line, control window) stays on the stock Small font.
         for (i in 0 until cellCount) {
             icons[i]
                 .setVisibility(false)
                 .addTo(this)
             values[i]
                 .setText("")
-                .setResource(Font.StockFont.Small)
+                .setResource(valueFontFor(layoutCount))
                 .setTextAlign(Align.left)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
             units[i]
                 .setText("")
-                .setResource(Font.StockFont.Small)
+                .setResource(unitFont)
                 .setTextAlign(Align.left)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
@@ -220,6 +236,9 @@ class HudScreen : Screen(420f, 150f) {
     private fun applyCount(count: Int) {
         layoutCount = count
         slots = slotsFor(count)
+        // ≤4-field pages get the big value face, 5–6-field pages the denser one.
+        val vf = valueFontFor(count)
+        for (i in 0 until cellCount) values[i].setResource(vf)
     }
 
     override fun onUpdateUI(timestampMs: Long) {
