@@ -120,6 +120,11 @@ private fun SettingsRoot(autoPair: Boolean) {
     // --- Pairing / connection (Location guard → BLE perms → our scan dialog), preserved ---
     var gpsBlocked by remember { mutableStateOf(false) }
     var linkConnected by remember { mutableStateOf(false) }
+    // True only while the activity is actually on-screen. The live preview owns the glasses while
+    // settings is in front; when the rider returns to the ride the activity is paused (not
+    // destroyed), so we must gate the preview on this — otherwise the loop keeps pushing demo
+    // frames forever and the HUD stays stuck on random data instead of resuming realtime.
+    var inForeground by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         while (true) {
             linkConnected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(false)
@@ -149,8 +154,8 @@ private fun SettingsRoot(autoPair: Boolean) {
     // Mirror a live preview of the current config onto the glasses while settings is open and
     // connected, so the rider sees their edits on the Maverick. The MaverickBridge honours
     // HudState.previewSnapshot; we clear it when leaving. Re-keys on cfg so each edit shows at once.
-    LaunchedEffect(linkConnected, cfg) {
-        if (!linkConnected) {
+    LaunchedEffect(linkConnected, inForeground, cfg) {
+        if (!linkConnected || !inForeground) {
             com.eider.karoomaverickhud.maverick.HudState.previewSnapshot.value = null
             return@LaunchedEffect
         }
@@ -209,18 +214,25 @@ private fun SettingsRoot(autoPair: Boolean) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                // Re-key the glasses-control LaunchedEffect so displayOn/centerX/Y get re-read
-                // after on-bike temple-pad changes (brightness/auto already stream live).
-                settingsResumeTick++
-                runCatching {
-                    val comm = Evs.instance().comm()
-                    if (comm.hasConfiguredDevice()) {
-                        val id = comm.getDeviceId()
-                        val name = comm.getDeviceName()
-                        if (!id.isNullOrEmpty() && id != cfg.maverickDeviceId) scope.launch { HudPreferences.setPairedDevice(ctx, id, name) }
-                    }
-                }.onFailure { Timber.w(it, "Mirroring configured device failed") }
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    inForeground = true
+                    // Re-key the glasses-control LaunchedEffect so displayOn/centerX/Y get re-read
+                    // after on-bike temple-pad changes (brightness/auto already stream live).
+                    settingsResumeTick++
+                    runCatching {
+                        val comm = Evs.instance().comm()
+                        if (comm.hasConfiguredDevice()) {
+                            val id = comm.getDeviceId()
+                            val name = comm.getDeviceName()
+                            if (!id.isNullOrEmpty() && id != cfg.maverickDeviceId) scope.launch { HudPreferences.setPairedDevice(ctx, id, name) }
+                        }
+                    }.onFailure { Timber.w(it, "Mirroring configured device failed") }
+                }
+                // Settings left the foreground (rider returned to the ride): release the glasses so
+                // the ride pipeline regains the screen and realtime data resumes.
+                Lifecycle.Event.ON_PAUSE -> inForeground = false
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
