@@ -7,7 +7,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.serialization.Serializable
 
-/** The HUD draws two edge columns (first & last of a notional four), so the centre stays clear. */
+/** The HUD draws two edge columns (first & last of a notional four), so the center stays clear. */
 const val COLUMNS = 2
 
 /** Rows are user-selectable; the layout supports two or three. */
@@ -37,7 +37,7 @@ data class ZoneBand(val name: String, val sub: String, val lo: Int, val hi: Int)
 
 /**
  * Power zones: the full 7-band model (cyan Z0 → purple Z6), named for their common meanings.
- * Boundaries are % of FTP; the rider can edit them in settings, but the count (and so the colour
+ * Boundaries are % of FTP; the rider can edit them in settings, but the count (and so the color
  * mapping below) is fixed at seven.
  */
 val DEFAULT_POWER_ZONES: List<ZoneBand> = listOf(
@@ -59,7 +59,7 @@ val DEFAULT_HR_ZONES: List<ZoneBand> = listOf(
     ZoneBand("Z5", "Max", 90, 110),
 )
 
-/** Colour per zone index — kept in lockstep with the band lists' fixed lengths. */
+/** Color per zone index — kept in lockstep with the band lists' fixed lengths. */
 val POWER_ZONE_COLORS = listOf(
     HudColor.CYAN, HudColor.WHITE, HudColor.GREEN, HudColor.YELLOW, HudColor.ORANGE, HudColor.RED, HudColor.PURPLE,
 )
@@ -86,7 +86,7 @@ data class GearLayout(
 
 /**
  * Zone thresholds from the user's profile; 0 base disables coloring for that field. Carries the
- * editable band lists so the renderer and the settings preview colour identically.
+ * editable band lists so the renderer and the settings preview color identically.
  */
 data class ZoneConfig(
     val ftp: Int,
@@ -101,12 +101,12 @@ data class ZoneConfig(
 }
 
 /**
- * Stream-local cross-field state that cadence colouring needs: the last power reading
+ * Stream-local cross-field state that cadence coloring needs: the last power reading
  * (since under-gearing depends on `power >= Z3`) and the timestamp when the under-gear
  * condition first became true (since it has to hold for ≥3 s before turning red).
  *
  * Lives for the duration of one pipeline (instantiated in [com.eider.karoomaverickhud.extension.RideHudExtension]);
- * mutated only from the single scan coroutine, so no synchronisation needed.
+ * mutated only from the single scan coroutine, so no synchronization needed.
  */
 class FormatContext {
     var lastPowerWatts: Double? = null
@@ -116,12 +116,12 @@ class FormatContext {
     var nowMs: () -> Long = { System.currentTimeMillis() }
 }
 
-/** How a field's value is read & formatted. Drives unit, conversion and zone colouring. */
+/** How a field's value is read & formatted. Drives unit, conversion and zone coloring. */
 enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER }
 
 /**
  * A field the HUD knows how to render. [id] is the Karoo [DataType.Type]. [label] is the picker
- * name. [kind] drives formatting/colour. [zone] enables training-zone colouring (power/HR).
+ * name. [kind] drives formatting/color. [zone] enables training-zone coloring (power/HR).
  * [unit] overrides the HUD unit text outright (e.g. "NP", "ride", "lap"); otherwise the unit is
  * the kind's base ("W", "bpm", "km/h"…) with [suffix] appended ("avg", "lap", "LL"). [valueField]
  * names the [DataType.Field] to read; null reads the point's single value.
@@ -243,8 +243,8 @@ object FieldFormat {
 
     /**
      * Format any data type into a [HudCell]. Known fields ([FIELD_SPECS]) get tailored units, a
-     * training-zone colour and an icon; unknown ones fall back to their raw single value. [ctx]
-     * carries cross-field state (last power, under-gear timer) that cadence colouring needs.
+     * training-zone color and an icon; unknown ones fall back to their raw single value. [ctx]
+     * carries cross-field state (last power, under-gear timer) that cadence coloring needs.
      */
     fun format(
         dataTypeId: String,
@@ -278,11 +278,11 @@ object FieldFormat {
      * (gated on [Field.WORKOUT_STEP_COUNT] > 0, which is non-zero exactly when a structured
      * workout file is present). Layout (6 cells, slot order TL-TR-BL-BR-ML-MR):
      *
-     *   TL: Power           TR: Cadence          (current values, coloured by range vs target)
+     *   TL: Power           TR: Cadence          (current values, colored by range vs target)
      *   ML: Power tgt       MR: Cadence tgt      (the prescribed target value)
      *   BL: NP (interval)   BR: "step/total" + time-remaining-in-interval
      *
-     * Range colouring uses the target's min/max band when present, otherwise ±5% of the
+     * Range coloring uses the target's min/max band when present, otherwise ±5% of the
      * target value: below → cyan, in band → green, above → red.
      */
     fun workoutPage(
@@ -389,7 +389,7 @@ object FieldFormat {
                 HudCell(v.intOrDash(), unit, color, spec.icon)
             }
             FieldKind.CADENCE -> {
-                // Only the live cadence field gets the deviation/under-gear colouring (needs ctx).
+                // Only the live cadence field gets the deviation/under-gear coloring (needs ctx).
                 val color = if (spec.id == DataType.Type.CADENCE) cadenceColor(v, zones.idealCadence, zones.ftp, ctx) else HudColor.WHITE
                 HudCell(v.intOrDash(), unit, color, spec.icon)
             }
@@ -407,8 +407,8 @@ object FieldFormat {
         }
     }
 
-    // Power colour: map %FTP into the rider's editable [DEFAULT_POWER_ZONES] bands (the 7-colour
-    // cyan→purple ramp). Boundaries come from settings; the colour-per-index is fixed.
+    // Power color: map %FTP into the rider's editable [DEFAULT_POWER_ZONES] bands (the 7-color
+    // cyan→purple ramp). Boundaries come from settings; the color-per-index is fixed.
     private fun powerColor(watts: Double?, ftp: Int, zones: List<ZoneBand>): HudColor {
         if (watts == null || ftp <= 0) return HudColor.WHITE
         val pct = (watts / ftp) * 100.0
@@ -416,7 +416,7 @@ object FieldFormat {
         return POWER_ZONE_COLORS.getOrElse(idx) { HudColor.WHITE }
     }
 
-    // HR colour: map %MaxHR into the editable [DEFAULT_HR_ZONES] (5-colour Coggan, no Z0).
+    // HR color: map %MaxHR into the editable [DEFAULT_HR_ZONES] (5-color Coggan, no Z0).
     private fun hrColor(bpm: Double?, maxHr: Int, zones: List<ZoneBand>): HudColor {
         if (bpm == null || maxHr <= 0) return HudColor.WHITE
         val pct = (bpm / maxHr) * 100.0
@@ -511,8 +511,8 @@ object FieldFormat {
 
     /**
      * 6-step ramp on the absolute deviation from 50/50, with tighter steps near neutral and
-     * wider ones at the extremes — the band widths grow as imbalance grows, so colour change
-     * feels gradual near the centre rather than snapping at fixed boundaries:
+     * wider ones at the extremes — the band widths grow as imbalance grows, so color change
+     * feels gradual near the center rather than snapping at fixed boundaries:
      *
      *     |Δ| ≤ 1   white   (effectively neutral)
      *     |Δ| 2-3   green   (acceptable spread)
