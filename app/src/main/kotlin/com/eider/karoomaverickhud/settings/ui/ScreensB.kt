@@ -49,6 +49,9 @@ import kotlinx.coroutines.launch
 
 private const val MAX_PAGES = 5
 
+/** Sentinel "page index" for the workout page tab (stored separately from the numbered pages). */
+private const val WORKOUT_TAB = -1
+
 /** Return a copy of [list] with elements [a] and [b] swapped. */
 private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
     list.toMutableList().also { val t = it[a]; it[a] = it[b]; it[b] = t }
@@ -57,13 +60,19 @@ private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
 @Composable
 fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map<String, DemoVal>) {
     val slotCount = cellsForRows(cfg.rows)
-    var active by remember { mutableStateOf(0) }
+    var active by remember { mutableStateOf(0) } // numbered page index, or WORKOUT_TAB
     var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) } // page, slot
     val pages = cfg.pages
-    val cur = active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
-    val curPage = pages.getOrNull(cur) ?: emptyList()
+    val isWorkout = active == WORKOUT_TAB
+    val cur = if (isWorkout) WORKOUT_TAB else active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    val curPage = if (isWorkout) cfg.workoutPage.take(slotCount) else pages.getOrNull(cur) ?: emptyList()
 
     fun setPages(next: List<List<String>>) { scope.launch { HudPreferences.setPages(ctx, next) } }
+    /** Persist an edit to whichever page is being edited — the workout page or a numbered one. */
+    fun setCurPage(next: List<String>) {
+        if (isWorkout) scope.launch { HudPreferences.setWorkoutPage(ctx, next) }
+        else setPages(pages.mapIndexed { i, p -> if (i == cur) next else p })
+    }
 
     Box(Modifier.fillMaxSize()) {
         ScreenScroll {
@@ -74,6 +83,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         scope.launch {
                             HudPreferences.setRows(ctx, r)
                             HudPreferences.setPages(ctx, pages.map { it.take(r * 2) })
+                            HudPreferences.setWorkoutPage(ctx, cfg.workoutPage.take(r * 2))
                         }
                     }
                 }
@@ -108,6 +118,20 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         }
                     }
                 }
+                // The workout page — always present, shown on the glasses only mid-workout.
+                Box(
+                    Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
+                        .background(if (isWorkout) K.accent else K.surface2)
+                        .border(1.dp, if (isWorkout) K.accent else K.line2, RoundedCornerShape(10.dp))
+                        .clickable(remember { MutableInteractionSource() }, null) { active = WORKOUT_TAB }
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        KIcon("bolt", 14.dp, if (isWorkout) K.onAccent else K.text2)
+                        KText("Workout", color = if (isWorkout) K.onAccent else K.text2, size = 13.sp, weight = FontWeight.SemiBold)
+                    }
+                }
             }
 
             // editable lens
@@ -116,7 +140,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                     Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 14.dp)) {
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween) {
-                            KText("Page ${cur + 1}", color = K.text, size = 17.sp, weight = FontWeight.Bold, family = CondFamily)
+                            KText(if (isWorkout) "Workout page" else "Page ${cur + 1}", color = K.text, size = 17.sp, weight = FontWeight.Bold, family = CondFamily)
                             KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 12.sp)
                         }
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -124,7 +148,12 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 selected = if (picker?.first == cur) picker!!.second else -1,
                                 onSlot = { picker = cur to it }, width = 408.dp)
                         }
-                        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isWorkout) {
+                            KText(
+                                "Appears by itself as the first page while a structured workout is loaded — it can't be removed or reordered.",
+                                color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 14.dp),
+                            )
+                        } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             KButton("", icon = "back", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur > 0,
                                 modifier = Modifier.width(52.dp)) {
                                 if (cur > 0) { setPages(swap(pages, cur, cur - 1)); active = cur - 1 }
@@ -146,18 +175,16 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 30.dp))
         }
 
-        picker?.let { (pg, slot) ->
+        picker?.let { (_, slot) ->
             val current = curPage.getOrNull(slot)
             FieldPickerSheet(
                 current = current, used = curPage, onClose = { picker = null },
                 onPick = { fid ->
-                    setPages(pages.mapIndexed { i, p ->
-                        if (i != pg) p else p.toMutableList().also { if (slot < it.size) it[slot] = fid else it.add(fid) }
-                    })
+                    setCurPage(curPage.toMutableList().also { if (slot < it.size) it[slot] = fid else it.add(fid) })
                     picker = null
                 },
                 onRemove = {
-                    setPages(pages.mapIndexed { i, p -> if (i == pg) p.filterIndexed { j, _ -> j != slot } else p })
+                    setCurPage(curPage.filterIndexed { j, _ -> j != slot })
                     picker = null
                 },
             )
