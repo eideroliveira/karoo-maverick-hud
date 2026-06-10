@@ -306,10 +306,10 @@ object FieldFormat {
         val curCadence = (cadence as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.CADENCE)
         val cT = targetOf(cadenceTarget)
         val npWatts = (normalizedPower as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.NORMALIZED_POWER)
-        // WORKOUT_TIME_TO_STEP_FINISH is the INT alt-type — convention is seconds (LONG ones
-        // ship ms). Promote to ms so the shared formatter handles it.
-        val secLeft = (timeRemaining as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH)
-        val timeLeftStr = formatDuration(secLeft?.let { it * 1000 })
+        // WORKOUT_TIME_TO_STEP_FINISH ships milliseconds (like the other time fields),
+        // despite being the INT alt-type — pass raw to the shared formatter.
+        val msLeft = (timeRemaining as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH)
+        val timeLeftStr = formatDuration(msLeft)
 
         val intervalLabel = "$currentStep/$stepCount"
         val intervalUnit = if (timeLeftStr == "--:--") "intvl" else "$timeLeftStr left"
@@ -396,7 +396,7 @@ object FieldFormat {
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
-            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v?.let { it * 1000 }), unit, HudColor.WHITE, spec.icon) // v is seconds
+            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
             FieldKind.RATIO -> HudCell(v?.let { "%.2f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
             FieldKind.NUMBER -> HudCell(v.intOrDash(), unit, HudColor.WHITE, spec.icon)
             FieldKind.BALANCE -> HudCell(formatBalance(raw), unit, balanceColor(raw), spec.icon)
