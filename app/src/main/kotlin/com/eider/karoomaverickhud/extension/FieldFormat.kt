@@ -401,7 +401,7 @@ object FieldFormat {
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
-            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v?.let { it * 1000 }), unit, HudColor.WHITE, spec.icon) // v is seconds
+            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
             FieldKind.RATIO -> HudCell(v?.let { "%.2f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
             FieldKind.NUMBER -> HudCell(v.intOrDash(), unit, HudColor.WHITE, spec.icon)
             FieldKind.STEPS -> {

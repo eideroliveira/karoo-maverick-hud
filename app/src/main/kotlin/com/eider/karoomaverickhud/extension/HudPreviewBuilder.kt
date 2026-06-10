@@ -64,7 +64,7 @@ object HudPreviewBuilder {
                 DataType.Field.WORKOUT_STEP_COUNT to 12.0,
             )
             DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION ->
-                mapOf(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 83.0) // seconds → "1:23"
+                mapOf(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 83_000.0) // ms → "1:23"
             else -> mapOf(dataTypeId to jit() * 100.0)
         }
         return StreamState.Streaming(DataPoint(dataTypeId = dataTypeId, values = values))
