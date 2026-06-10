@@ -106,7 +106,10 @@ private fun demoFor(spec: com.eider.karoomaverickhud.extension.FieldSpec): DemoV
         com.eider.karoomaverickhud.extension.FieldKind.INTERVAL_TIME -> DemoVal("1:23", null)
         com.eider.karoomaverickhud.extension.FieldKind.RATIO ->
             DemoVal(if (spec.unit == "VI") "1.05" else "0.85", null)
-        com.eider.karoomaverickhud.extension.FieldKind.NUMBER -> DemoVal("84", null)
+        com.eider.karoomaverickhud.extension.FieldKind.NUMBER -> DemoVal(
+            when (spec.unit) { "W tgt" -> "250"; "rpm tgt" -> "90"; else -> "84" }, null,
+        )
+        com.eider.karoomaverickhud.extension.FieldKind.STEPS -> DemoVal("3/12", null)
         com.eider.karoomaverickhud.extension.FieldKind.BALANCE -> DemoVal("51/49", 51.0)
         com.eider.karoomaverickhud.extension.FieldKind.GEARS -> DemoVal("50/14", null)
     }

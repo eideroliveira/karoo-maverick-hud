@@ -112,12 +112,33 @@ class FormatContext {
     var lastPowerWatts: Double? = null
     var underGearedSinceMs: Long? = null
 
+    /**
+     * Last workout step targets, stashed whenever a target field is formatted (the pipeline
+     * subscribes the target streams alongside live POWER/CADENCE). While a target streams
+     * (i.e. a structured workout step prescribes one), the live fields render "value/target"
+     * and switch from zone coloring to range-vs-target coloring.
+     */
+    var powerTarget: WorkoutTarget? = null
+    var cadenceTarget: WorkoutTarget? = null
+
     /** Wall-clock; abstracted so tests can drive time without `System.currentTimeMillis()`. */
     var nowMs: () -> Long = { System.currentTimeMillis() }
 }
 
+/** A workout step target — the prescribed value plus its optional min/max band. */
+data class WorkoutTarget(val value: Double?, val min: Double?, val max: Double?) {
+    /**
+     * Whether the stream actually carried a target — it goes Idle outside a workout, and
+     * free-ride steps prescribe nothing (the fields read 0), so zeros don't count.
+     */
+    val isSet: Boolean get() = (value != null && value > 0) || (min != null && max != null && max > 0)
+
+    /** The number to display as the target: the prescribed value, else the band's midpoint. */
+    val displayValue: Int? get() = (value ?: if (min != null && max != null) (min + max) / 2 else null)?.roundToInt()
+}
+
 /** How a field's value is read & formatted. Drives unit, conversion and zone coloring. */
-enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER }
+enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER, STEPS }
 
 /**
  * A field the HUD knows how to render. [id] is the Karoo [DataType.Type]. [label] is the picker
@@ -185,6 +206,11 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.NORMALIZED_POWER_LAST_LAP, "LL NP", FieldKind.POWER, HudIcon.POWER, zone = true, unit = "NP LL"),
     FieldSpec(DataType.Type.AVERAGE_HR_LAST_LAP, "LL HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "LL"),
     FieldSpec(DataType.Type.AVERAGE_CADENCE_LAST_LAP, "LL CAD", FieldKind.CADENCE, HudIcon.CADENCE, suffix = "LL"),
+    // ---- workout (targets & step progress; the streams only carry data while a structured
+    //      workout is loaded — outside one these render "--") ----
+    FieldSpec(DataType.Type.WORKOUT_POWER_TARGET, "PWR TGT", FieldKind.NUMBER, HudIcon.POWER, unit = "W tgt", valueField = DataType.Field.WORKOUT_TARGET_VALUE),
+    FieldSpec(DataType.Type.WORKOUT_CADENCE_TARGET, "CAD TGT", FieldKind.NUMBER, HudIcon.CADENCE, unit = "rpm tgt", valueField = DataType.Field.WORKOUT_TARGET_VALUE),
+    FieldSpec(DataType.Type.WORKOUT_INTERVAL_COUNT, "STEP", FieldKind.STEPS, HudIcon.TIME, unit = "step"),
 )
 
 /** One rendered field: the value, its unit/label, a zone color, and an optional icon. */
@@ -274,71 +300,29 @@ object FieldFormat {
     }
 
     /**
-     * The auto workout page — rendered only when a workout is actually loaded to the ride
-     * (gated on [Field.WORKOUT_STEP_COUNT] > 0, which is non-zero exactly when a structured
-     * workout file is present). Layout (6 cells, slot order TL-TR-BL-BR-ML-MR):
-     *
-     *   TL: Power           TR: Cadence          (current values, colored by range vs target)
-     *   ML: Power tgt       MR: Cadence tgt      (the prescribed target value)
-     *   BL: NP (interval)   BR: "step/total" + time-remaining-in-interval
-     *
-     * Range coloring uses the target's min/max band when present, otherwise ±5% of the
-     * target value: below → cyan, in band → green, above → red.
+     * Whether a structured workout is loaded, from the [DataType.Type.WORKOUT_INTERVAL_COUNT]
+     * stream — [DataType.Field.WORKOUT_STEP_COUNT] is only populated when a workout file is
+     * present; the stream is Idle/NotAvailable otherwise.
      */
-    fun workoutPage(
-        powerTarget: StreamState,
-        cadenceTarget: StreamState,
-        power: StreamState,
-        cadence: StreamState,
-        intervalCount: StreamState,
-        normalizedPower: StreamState,
-        timeRemaining: StreamState,
-    ): List<HudCell>? {
-        // "Workout added to the ride" signal — step count is only populated when a structured
-        // workout file is loaded; the stream is Idle/NotAvailable otherwise.
-        val intervalDp = (intervalCount as? StreamState.Streaming)?.dataPoint ?: return null
-        val stepCount = intervalDp.values[DataType.Field.WORKOUT_STEP_COUNT]?.toInt() ?: 0
-        if (stepCount <= 0) return null
-        val currentStep = (intervalDp.values[DataType.Field.WORKOUT_CURRENT_STEP] ?: 0.0).toInt()
-
-        val curPower = (power as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.POWER)
-        val pT = targetOf(powerTarget)
-        val curCadence = (cadence as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.CADENCE)
-        val cT = targetOf(cadenceTarget)
-        val npWatts = (normalizedPower as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.NORMALIZED_POWER)
-        // WORKOUT_TIME_TO_STEP_FINISH is the INT alt-type — convention is seconds (LONG ones
-        // ship ms). Promote to ms so the shared formatter handles it.
-        val secLeft = (timeRemaining as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH)
-        val timeLeftStr = formatDuration(secLeft?.let { it * 1000 })
-
-        val intervalLabel = "$currentStep/$stepCount"
-        val intervalUnit = if (timeLeftStr == "--:--") "intvl" else "$timeLeftStr left"
-
-        return listOf(
-            // TL, TR
-            HudCell(curPower.intOrDash(), "W", rangeColor(curPower, pT), HudIcon.POWER),
-            HudCell(curCadence.intOrDash(), "rpm", rangeColor(curCadence, cT), HudIcon.CADENCE),
-            // BL, BR
-            HudCell(npWatts.intOrDash(), "W NP", HudColor.WHITE, HudIcon.POWER),
-            HudCell(intervalLabel, intervalUnit, HudColor.WHITE, HudIcon.TIME),
-            // ML, MR
-            HudCell(pT.value?.roundToInt()?.toString() ?: "--", "W tgt", HudColor.WHITE, HudIcon.POWER),
-            HudCell(cT.value?.roundToInt()?.toString() ?: "--", "rpm tgt", HudColor.WHITE, HudIcon.CADENCE),
-        )
+    fun workoutActive(intervalCount: StreamState): Boolean {
+        val dp = (intervalCount as? StreamState.Streaming)?.dataPoint ?: return false
+        return (dp.values[DataType.Field.WORKOUT_STEP_COUNT]?.toInt() ?: 0) > 0
     }
 
-    private data class Target(val value: Double?, val min: Double?, val max: Double?)
-
-    private fun targetOf(state: StreamState): Target {
-        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return Target(null, null, null)
-        return Target(
+    private fun targetOf(state: StreamState): WorkoutTarget {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return WorkoutTarget(null, null, null)
+        return WorkoutTarget(
             dp.values[DataType.Field.WORKOUT_TARGET_VALUE],
             dp.values[DataType.Field.WORKOUT_TARGET_MIN_VALUE],
             dp.values[DataType.Field.WORKOUT_TARGET_MAX_VALUE],
         )
     }
 
-    private fun rangeColor(current: Double?, t: Target): HudColor {
+    /**
+     * Range-vs-target coloring: uses the target's min/max band when present, otherwise ±5% of
+     * the target value — below → cyan, in band → green, above → red.
+     */
+    private fun rangeColor(current: Double?, t: WorkoutTarget): HudColor {
         if (current == null) return HudColor.WHITE
         val min = t.min
         val max = t.max
@@ -377,21 +361,42 @@ object FieldFormat {
         // Value via the spec's named field, else the point's single value.
         val v = raw?.let { dp -> spec.valueField?.let { dp.values[it] } ?: dp.singleValue }
         val unit = hudUnit(spec, imperial)
+        // Stash workout targets for the live POWER/CADENCE range coloring below. The streams go
+        // Idle outside a workout, which stashes an unset target and restores zone coloring.
+        when (spec.id) {
+            DataType.Type.WORKOUT_POWER_TARGET -> ctx?.powerTarget = targetOf(state)
+            DataType.Type.WORKOUT_CADENCE_TARGET -> ctx?.cadenceTarget = targetOf(state)
+        }
         return when (spec.kind) {
             FieldKind.POWER -> {
                 // Cache live power so the next CADENCE update can evaluate the under-gear rule.
                 if (spec.id == DataType.Type.POWER) ctx?.lastPowerWatts = v
-                val color = if (spec.zone) powerColor(v, zones.ftp, zones.powerZones) else HudColor.WHITE
-                HudCell(v.intOrDash(), unit, color, spec.icon)
+                // While a workout step prescribes a target, live power reads "value/target" and
+                // tracks the target's range; zone coloring otherwise.
+                val target = if (spec.id == DataType.Type.POWER) ctx?.powerTarget?.takeIf { it.isSet } else null
+                val color = when {
+                    target != null -> rangeColor(v, target)
+                    spec.zone -> powerColor(v, zones.ftp, zones.powerZones)
+                    else -> HudColor.WHITE
+                }
+                val value = target?.displayValue?.let { "${v.intOrDash()}/$it" } ?: v.intOrDash()
+                HudCell(value, unit, color, spec.icon)
             }
             FieldKind.HR -> {
                 val color = if (spec.zone) hrColor(v, zones.maxHr, zones.hrZones) else HudColor.WHITE
                 HudCell(v.intOrDash(), unit, color, spec.icon)
             }
             FieldKind.CADENCE -> {
-                // Only the live cadence field gets the deviation/under-gear coloring (needs ctx).
-                val color = if (spec.id == DataType.Type.CADENCE) cadenceColor(v, zones.idealCadence, zones.ftp, ctx) else HudColor.WHITE
-                HudCell(v.intOrDash(), unit, color, spec.icon)
+                // Only the live cadence field gets the deviation/under-gear coloring (needs ctx);
+                // a streaming workout cadence target takes precedence, as for power.
+                val target = if (spec.id == DataType.Type.CADENCE) ctx?.cadenceTarget?.takeIf { it.isSet } else null
+                val color = when {
+                    target != null -> rangeColor(v, target)
+                    spec.id == DataType.Type.CADENCE -> cadenceColor(v, zones.idealCadence, zones.ftp, ctx)
+                    else -> HudColor.WHITE
+                }
+                val value = target?.displayValue?.let { "${v.intOrDash()}/$it" } ?: v.intOrDash()
+                HudCell(value, unit, color, spec.icon)
             }
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
@@ -399,6 +404,12 @@ object FieldFormat {
             FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v?.let { it * 1000 }), unit, HudColor.WHITE, spec.icon) // v is seconds
             FieldKind.RATIO -> HudCell(v?.let { "%.2f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
             FieldKind.NUMBER -> HudCell(v.intOrDash(), unit, HudColor.WHITE, spec.icon)
+            FieldKind.STEPS -> {
+                // Workout progress as "current/total"; the step count only streams mid-workout.
+                val total = raw?.values?.get(DataType.Field.WORKOUT_STEP_COUNT)?.toInt() ?: 0
+                val current = (raw?.values?.get(DataType.Field.WORKOUT_CURRENT_STEP) ?: 0.0).toInt()
+                HudCell(if (total > 0) "$current/$total" else "--", unit, HudColor.WHITE, spec.icon)
+            }
             FieldKind.BALANCE -> HudCell(formatBalance(raw), unit, balanceColor(raw), spec.icon)
             FieldKind.GEARS -> {
                 val (gv, gu) = formatGears(raw, gear)

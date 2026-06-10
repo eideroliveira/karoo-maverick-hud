@@ -125,51 +125,40 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
-        // Auto workout page — only rendered when a structured workout is loaded
-        // ([FieldFormat.workoutPage] gates on WORKOUT_STEP_COUNT > 0 and returns null otherwise).
-        // 7 streams feed it; we use combine's vararg form since the typed 5-arg overload doesn't
-        // reach. Order matches workoutPage's parameter list.
-        val workoutFlow = combine(
-            karoo.streamDataFlow(DataType.Type.WORKOUT_POWER_TARGET),
-            karoo.streamDataFlow(DataType.Type.WORKOUT_CADENCE_TARGET),
-            karoo.streamDataFlow(DataType.Type.POWER),
-            karoo.streamDataFlow(DataType.Type.CADENCE),
-            karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT),
-            karoo.streamDataFlow(DataType.Type.NORMALIZED_POWER_LAP),
-            karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
-        ) { states ->
-            FieldFormat.workoutPage(
-                powerTarget = states[0],
-                cadenceTarget = states[1],
-                power = states[2],
-                cadence = states[3],
-                intervalCount = states[4],
-                normalizedPower = states[5],
-                timeRemaining = states[6],
-            )
-        }.stateIn(scope, SharingStarted.Eagerly, null)
+        // Whether a structured workout is loaded — WORKOUT_STEP_COUNT only streams non-zero while
+        // a workout file is present. Gates the (user-editable) workout page below.
+        val workoutActiveFlow = karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT)
+            .map { FieldFormat.workoutActive(it) }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, false)
 
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row
         // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
-        // use the user's custom pages.
-        val layoutFlow = configFlow.combine(activePageFlow) { cfg, active ->
+        // use the user's custom pages. A live workout prepends the configured workout page.
+        val layoutFlow = combine(configFlow, activePageFlow, workoutActiveFlow) { cfg, active, workoutActive ->
             val cap = cellsForRows(cfg.rows)
-            if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
+            val base = if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
                 val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
                 if (fields.isEmpty()) emptyList() else listOf(fields)
             } else {
                 cfg.pages.asSequence().map { it.take(cap) }.filter { it.isNotEmpty() }.toList()
             }
+            if (workoutActive && cfg.workoutPage.isNotEmpty()) listOf(cfg.workoutPage.take(cap)) + base else base
         }.distinctUntilChanged()
 
         layoutFlow.flatMapLatest { layout ->
-            // CADENCE colouring needs the live power reading for its under-gear rule, so we
-            // subscribe to POWER whenever CADENCE is shown even if POWER isn't itself displayed.
-            // (POWER stays out of the rendered layout; only [ids] grows.)
+            // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
+            // CADENCE colouring needs the live power reading for its under-gear rule, and the
+            // live POWER/CADENCE fields need their workout target streams to render
+            // "value/target" mid-workout even when no target field is on a page. The target
+            // streams are Idle outside a workout, so the extra subscriptions cost nothing.
             val displayed = layout.asSequence().flatten().distinct().toList()
-            val ids = if ((DataType.Type.CADENCE in displayed) && (DataType.Type.POWER !in displayed)) {
-                displayed + DataType.Type.POWER
-            } else displayed
+            val ids = buildList {
+                addAll(displayed)
+                if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
+                if (DataType.Type.POWER in displayed && DataType.Type.WORKOUT_POWER_TARGET !in displayed) add(DataType.Type.WORKOUT_POWER_TARGET)
+                if (DataType.Type.CADENCE in displayed && DataType.Type.WORKOUT_CADENCE_TARGET !in displayed) add(DataType.Type.WORKOUT_CADENCE_TARGET)
+            }
             val cellsFlow = if (ids.isEmpty()) {
                 flowOf(emptyMap())
             } else {
@@ -189,13 +178,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             cellsFlow.map { cells -> layout to cells }
         }
             .sample(configFlow.value.refreshIntervalMs)
-            .combine(rideStateFlow) { (layout, cells), ride -> Triple(layout, cells, ride) }
-            .combine(workoutFlow) { (layout, cells, ride), workout ->
-                val basePages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } }
-                // A live workout gets its own page, shown first.
-                val pages = if (workout != null) listOf(workout) + basePages else basePages
+            .combine(rideStateFlow) { (layout, cells), ride ->
                 HudSnapshot(
-                    pages = pages,
+                    pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,

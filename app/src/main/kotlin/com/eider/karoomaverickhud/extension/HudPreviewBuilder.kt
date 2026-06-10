@@ -53,6 +53,18 @@ object HudPreviewBuilder {
                 DataType.Field.SHIFTING_FRONT_GEAR_TEETH to cfg.gear.front.last().toDouble(),
                 DataType.Field.SHIFTING_REAR_GEAR_TEETH to cfg.gear.rear[cfg.gear.rear.size / 2].toDouble(),
             )
+            DataType.Type.WORKOUT_POWER_TARGET -> mapOf(
+                DataType.Field.WORKOUT_TARGET_VALUE to cfg.ftp * 0.90,
+                DataType.Field.WORKOUT_TARGET_MIN_VALUE to cfg.ftp * 0.85,
+                DataType.Field.WORKOUT_TARGET_MAX_VALUE to cfg.ftp * 0.95,
+            )
+            DataType.Type.WORKOUT_CADENCE_TARGET -> mapOf(DataType.Field.WORKOUT_TARGET_VALUE to cfg.idealCadence.toDouble())
+            DataType.Type.WORKOUT_INTERVAL_COUNT -> mapOf(
+                DataType.Field.WORKOUT_CURRENT_STEP to 3.0,
+                DataType.Field.WORKOUT_STEP_COUNT to 12.0,
+            )
+            DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION ->
+                mapOf(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 83.0) // seconds → "1:23"
             else -> mapOf(dataTypeId to jit() * 100.0)
         }
         return StreamState.Streaming(DataPoint(dataTypeId = dataTypeId, values = values))

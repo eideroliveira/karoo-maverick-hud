@@ -50,6 +50,12 @@ data class HudConfig(
      * Used by AUTO/MANUAL modes; FOLLOW_KAROO ignores these and mirrors the Karoo page.
      */
     val pages: List<List<String>>,
+    /**
+     * The workout page's fields — shown automatically as the first page while a structured
+     * workout is loaded (gated in the extension on WORKOUT_STEP_COUNT > 0). Editable like any
+     * page, but it can't be removed or reordered; it simply doesn't render outside a workout.
+     */
+    val workoutPage: List<String>,
     /** Rows of fields per glasses column (2 or 3); each page holds 2 columns × this many. */
     val rows: Int,
     /** Training-zone thresholds for value coloring (0 disables that field's coloring). */
@@ -73,6 +79,21 @@ data class HudConfig(
             listOf(DataType.Type.DISTANCE, DataType.Type.AVERAGE_SPEED, DataType.Type.HEART_RATE, DataType.Type.ELAPSED_TIME),
         )
 
+        /**
+         * Seeded workout page. Live power/cadence render "value/target" by themselves while a
+         * step prescribes a target, so no dedicated target cells are needed — the freed slots
+         * carry interval NP, HR, time-left and step progress
+         * (slot order TL-TR-BL-BR-ML-MR; the lens columns draw 0-4-2 / 1-5-3).
+         */
+        val DEFAULT_WORKOUT_PAGE: List<String> = listOf(
+            DataType.Type.POWER,
+            DataType.Type.CADENCE,
+            DataType.Type.NORMALIZED_POWER_LAP,
+            DataType.Type.WORKOUT_INTERVAL_COUNT,
+            DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION,
+            DataType.Type.HEART_RATE,
+        )
+
         val DEFAULT = HudConfig(
             maverickDeviceId = null,
             maverickDeviceName = null,
@@ -81,6 +102,7 @@ data class HudConfig(
             pageMode = PageMode.AUTO,
             autoCycleMs = 5_000L,
             pages = DEFAULT_PAGES,
+            workoutPage = DEFAULT_WORKOUT_PAGE,
             rows = 3,
             ftp = 200,
             maxHr = 185,
@@ -104,6 +126,7 @@ object HudPreferences {
     private val KEY_PAGE_MODE = stringPreferencesKey("page_mode")
     private val KEY_AUTO_CYCLE_MS = longPreferencesKey("auto_cycle_ms")
     private val KEY_PAGES = stringPreferencesKey("pages_json")
+    private val KEY_WORKOUT_PAGE = stringPreferencesKey("workout_page_json")
     private val KEY_ROWS = intPreferencesKey("rows")
     private val KEY_FTP = intPreferencesKey("ftp")
     private val KEY_MAX_HR = intPreferencesKey("max_hr")
@@ -124,6 +147,7 @@ object HudPreferences {
                 ?: HudConfig.DEFAULT.pageMode,
             autoCycleMs = prefs[KEY_AUTO_CYCLE_MS] ?: HudConfig.DEFAULT.autoCycleMs,
             pages = prefs[KEY_PAGES]?.let { decodePages(it) } ?: HudConfig.DEFAULT_PAGES,
+            workoutPage = prefs[KEY_WORKOUT_PAGE]?.let { decodeFields(it) } ?: HudConfig.DEFAULT_WORKOUT_PAGE,
             rows = (prefs[KEY_ROWS] ?: HudConfig.DEFAULT.rows).coerceIn(MIN_ROWS, MAX_ROWS),
             ftp = prefs[KEY_FTP] ?: HudConfig.DEFAULT.ftp,
             maxHr = prefs[KEY_MAX_HR] ?: HudConfig.DEFAULT.maxHr,
@@ -207,8 +231,15 @@ object HudPreferences {
         context.dataStore.edit { it[KEY_PAGES] = Json.encodeToString(pages) }
     }
 
+    suspend fun setWorkoutPage(context: Context, fields: List<String>) {
+        context.dataStore.edit { it[KEY_WORKOUT_PAGE] = Json.encodeToString(fields) }
+    }
+
     private fun decodePages(json: String): List<List<String>>? =
         runCatching { Json.decodeFromString<List<List<String>>>(json) }.getOrNull()
+
+    private fun decodeFields(json: String): List<String>? =
+        runCatching { Json.decodeFromString<List<String>>(json) }.getOrNull()
 
     private fun decodeZones(json: String): List<ZoneBand>? =
         runCatching { Json.decodeFromString<List<ZoneBand>>(json) }.getOrNull()
