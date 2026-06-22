@@ -1,7 +1,10 @@
 /* ============================================================
    KarooTheme.kt — Karoo OS native design tokens + SVG-path icon.
    Mirrors styles.css :root and data.jsx ICON_PATHS / <Icon>.
-   Dark, high-contrast; colour is reserved for data/zone meaning.
+   The settings chrome is LIGHT (the Karoo runs its UI in light
+   mode); colour is reserved for data/zone meaning. The glasses
+   *preview* lens stays dark — see [Lens] — because that's what the
+   rider actually sees on the Maverick.
    ============================================================ */
 package com.eider.karoomaverickhud.settings.ui
 
@@ -19,28 +22,30 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.eider.karoomaverickhud.extension.HudColor
 
-/** Surfaces, text, accent and the zone/data palette — straight from styles.css. */
+/** Surfaces, text, accent and the zone/data palette for the LIGHT settings chrome. */
 object K {
-    val bg = Color(0xFF08090B)
-    val surface = Color(0xFF121419)
-    val surface2 = Color(0xFF1A1D23)
-    val surface3 = Color(0xFF23272F)
-    val surface4 = Color(0xFF2D323B)
-    val line = Color(0xFF2A2F38)
-    val line2 = Color(0xFF383E49)
-    val line3 = Color(0xFF4A515E)
+    val bg = Color(0xFFEDEFF2)             // page background (light grey)
+    val surface = Color(0xFFFFFFFF)        // cards, app bar, sheets
+    val surface2 = Color(0xFFE8EBEF)       // inset rows, pills, segmented track
+    val surface3 = Color(0xFFDFE3E8)       // chips, stepper buttons
+    val surface4 = Color(0xFFCED4DB)       // pressed state, switch off-track
+    val line = Color(0xFFE0E4E9)           // hairline dividers, card borders
+    val line2 = Color(0xFFD0D6DD)          // stronger borders
+    val line3 = Color(0xFFB4BBC5)          // strongest hairline (radios, sheet grabber)
 
-    val text = Color(0xFFF3F5F7)
-    val text2 = Color(0xFF99A1AC)
-    val text3 = Color(0xFF646B76)
+    val text = Color(0xFF14171C)           // primary text (near-black)
+    val text2 = Color(0xFF545C67)          // secondary text
+    val text3 = Color(0xFF767E89)          // tertiary text / captions
 
-    val accent = Color(0xFF1FE3C8)
-    val accentDim = Color(0x241FE3C8)      // ~0.14 alpha
-    val accentLine = Color(0x661FE3C8)     // ~0.40 alpha
-    val accentPress = Color(0xFF15B6A0)
-    val onAccent = Color(0xFF042720)
+    val accent = Color(0xFF0C9A8A)         // teal — fills + accent text/icons on light
+    val accentDim = Color(0x1A0C9A8A)      // ~0.10 alpha — pale teal tint (selected rows, AUTO pill)
+    val accentLine = Color(0x660C9A8A)     // ~0.40 alpha
+    val accentPress = Color(0xFF0A8275)
+    val onAccent = Color(0xFFFFFFFF)       // text/icons on a teal fill
 
-    // zone / data palette
+    // zone / data palette — bright, tuned for the dark glasses lens; shared with the live preview,
+    // so these stay vivid. Do NOT darken them for the light chrome; use the cXxx accents below for
+    // chrome icon tints instead.
     val zWhite = Color(0xFFFFFFFF)
     val zGreen = Color(0xFF36D85F)
     val zYellow = Color(0xFFFFD60A)        // cadence drift (no CSS token; matches HUD yellow)
@@ -50,9 +55,33 @@ object K {
     val zBlue = Color(0xFF2E8DFF)
     val zCyan = Color(0xFF34D2E0)          // power Z0 (sub-recovery)
 
-    val good = Color(0xFF36D85F)
-    val warn = Color(0xFFFF9F0A)
-    val bad = Color(0xFFFF453A)
+    // Stand-in for the white/recovery zone on the light chrome ramps & dots (pure white vanishes there).
+    val zNeutral = Color(0xFFB0B6BF)
+
+    // Chrome accent tints — deeper than the bright zone palette so icon chips / hub cards read
+    // crisply on the white settings surface (the zone palette above is for the dark lens).
+    val cRed = Color(0xFFD83A45)
+    val cOrange = Color(0xFFDB7A0C)
+    val cGreen = Color(0xFF1E9E4E)
+    val cBlue = Color(0xFF1F6FE0)
+    val cPurple = Color(0xFFC42E96)
+
+    val good = Color(0xFF1E9E4E)
+    val warn = Color(0xFFDB7A0C)
+    val bad = Color(0xFFD83A45)
+}
+
+/**
+ * The glasses preview lens is intentionally DARK regardless of the light chrome — it mocks what the
+ * rider sees on the Maverick. These are the lens-internal ink/accent tokens (label text, page dots,
+ * selected-slot highlight) so the preview stays readable on its dark background. Zone-tinted *values*
+ * keep using the bright [K] zone palette.
+ */
+object Lens {
+    val label = Color(0xFF99A1AC)          // dim grey field labels / icons on the lens
+    val faint = Color(0xFF646B76)          // fainter still (empty-slot placeholder)
+    val accent = Color(0xFF1FE3C8)         // bright teal — page dots, selected slot
+    val accentDim = Color(0x241FE3C8)      // ~0.14 alpha selected-slot fill
 }
 
 /** Map a rendered [HudColor] to its settings-preview Color, so preview == glasses. */
@@ -66,9 +95,14 @@ fun HudColor.toComposeColor(): Color = when (this) {
     HudColor.CYAN -> K.zCyan
 }
 
-/** Colours per power/HR zone index, aligned with FieldFormat's POWER/HR_ZONE_COLORS. */
-val POWER_ZONE_UI_COLORS = listOf(K.zCyan, K.zWhite, K.zGreen, K.zYellow, K.zOrange, K.zRed, K.zPurple)
-val HR_ZONE_UI_COLORS = listOf(K.zWhite, K.zGreen, K.zOrange, K.zRed, K.zPurple)
+/**
+ * Colours per power/HR zone index, aligned with FieldFormat's POWER/HR_ZONE_COLORS. These tint the
+ * light-chrome zone ramps & dots, so the white/recovery zone uses [K.zNeutral] (pure white is
+ * invisible on the light surface); the glasses lens colours its values straight from the bright
+ * zone palette instead.
+ */
+val POWER_ZONE_UI_COLORS = listOf(K.zCyan, K.zNeutral, K.zGreen, K.zYellow, K.zOrange, K.zRed, K.zPurple)
+val HR_ZONE_UI_COLORS = listOf(K.zNeutral, K.zGreen, K.zOrange, K.zRed, K.zPurple)
 
 /* ---- Icon set: crisp line glyphs, viewBox 24, stroked with the given colour ---- */
 val ICON_PATHS: Map<String, String> = mapOf(

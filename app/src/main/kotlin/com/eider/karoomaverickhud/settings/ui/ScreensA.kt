@@ -104,7 +104,7 @@ fun HubScreen(
 
         KSectionLabel("Configuration")
         Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            HubCard("rider", K.zRed, "Rider Profile",
+            HubCard("rider", K.cRed, "Rider Profile",
                 "FTP ${cfg.ftp} W · Max HR ${cfg.maxHr} · Cadence ${cfg.idealCadence}", onClick = { nav("profile") }) {
                 Row(Modifier.fillMaxWidth().padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     POWER_ZONE_UI_COLORS.forEach {
@@ -112,7 +112,7 @@ fun HubScreen(
                     }
                 }
             }
-            HubCard("gear", K.zOrange, "Gear",
+            HubCard("gear", K.cOrange, "Gear",
                 "${dt?.let { it.brand + " " + it.name } ?: "Custom"} · ${cfg.gear.front.size}×${cfg.gear.rear.size}",
                 status = if (cfg.gear.source == "auto" && dt?.electronic == true) {
                     { KPill("AUTO", color = K.accent, bg = K.accentDim, height = 21.dp) }
@@ -120,11 +120,11 @@ fun HubScreen(
                 onClick = { nav("gear") })
             HubCard("pages", K.accent, "Data Pages",
                 "${cfg.pages.size} pages · $totalFields fields · ${cfg.rows} rows", onClick = { nav("pages") })
-            HubCard("glasses", K.zBlue, "Glasses",
+            HubCard("glasses", K.cBlue, "Glasses",
                 if (connected) "${cfg.maverickDeviceName ?: "Maverick"} · ${battery ?: "—"}% · brightness" else "No glasses connected",
                 status = { KStatusDot(if (connected) K.good else K.text3) },
                 onClick = { nav("glasses") })
-            HubCard("ruler", K.zPurple, "Display & Units",
+            HubCard("ruler", K.cPurple, "Display & Units",
                 "${if (cfg.imperial) "Imperial (mph, mi)" else "Metric (km/h, km)"} · ${pageModeLabel(cfg)}",
                 onClick = { nav("display") })
         }
@@ -187,7 +187,7 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
         KSectionLabel("Power · FTP")
         CardBlock {
             KRow {
-                KIconChip("power", color = K.zOrange)
+                KIconChip("power", color = K.cOrange)
                 Column(Modifier.weight(1f)) {
                     KText("Functional Threshold", color = K.text, size = 16.sp, weight = FontWeight.Medium)
                     KText("Your 1-hour max power. Sets the power zones below.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
@@ -209,7 +209,7 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
         KSectionLabel("Heart Rate")
         CardBlock {
             KRow {
-                KIconChip("heart", color = K.zRed)
+                KIconChip("heart", color = K.cRed)
                 Column(Modifier.weight(1f)) {
                     KText("Max Heart Rate", color = K.text, size = 16.sp, weight = FontWeight.Medium)
                     KText("Your highest sustained bpm. Sets the HR zones below.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
@@ -231,7 +231,7 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
         KSectionLabel("Cadence")
         CardBlock {
             KRow(last = true) {
-                KIconChip("cadence", color = K.zGreen)
+                KIconChip("cadence", color = K.cGreen)
                 Column(Modifier.weight(1f)) {
                     KText("Ideal Cadence", color = K.text, size = 16.sp, weight = FontWeight.Medium)
                     KText("Target rpm. The HUD drifts yellow, then orange, as you move off it.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
@@ -287,7 +287,7 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Box(Modifier.size(48.dp).clip(RoundedCornerShape(11.dp)).background(K.surface3), contentAlignment = Alignment.Center) {
-                        KIcon("gear", 26.dp, K.zOrange)
+                        KIcon("gear", 26.dp, K.cOrange)
                     }
                     Column(Modifier.weight(1f)) {
                         KText(dt?.let { "${it.brand} ${it.name}" } ?: "Custom drivetrain", color = K.text, size = 19.sp, weight = FontWeight.Bold, family = CondFamily)
@@ -367,7 +367,7 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 Column(Modifier.padding(bottom = 20.dp)) {
                     DRIVETRAINS.forEach { d ->
                         KRow(onClick = { save(gear.copy(drivetrainId = d.id, front = d.front, rear = d.rear)); showPresets = false }) {
-                            KIconChip("gear", color = K.zOrange)
+                            KIconChip("gear", color = K.cOrange)
                             Column(Modifier.weight(1f)) {
                                 KText("${d.brand} ${d.name}", color = K.text, size = 16.sp, weight = FontWeight.Medium)
                                 KText("${d.front.joinToString("/")}T · ${d.rear.first()}–${d.rear.last()}T · ${d.speeds}sp${if (d.electronic) " · electronic" else ""}",
@@ -385,7 +385,7 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                     CASSETTES.forEach { c ->
                         val selected = c.cogs == gear.rear
                         KRow(onClick = { save(gear.copy(rear = c.cogs)); showCassettes = false }) {
-                            KIconChip("gear", color = if (selected) K.accent else K.zOrange)
+                            KIconChip("gear", color = if (selected) K.accent else K.cOrange)
                             Column(Modifier.weight(1f)) {
                                 KText(c.label, color = K.text, size = 16.sp, weight = FontWeight.Medium)
                                 KText(c.cogs.joinToString("·"), color = K.text2, size = 12.sp, maxLines = 1)

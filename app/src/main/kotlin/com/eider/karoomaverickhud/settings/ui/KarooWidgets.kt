@@ -98,7 +98,9 @@ fun KSwitch(on: Boolean, onChange: (Boolean) -> Unit) {
                 .padding(start = knobX, top = 3.dp)
                 .size(26.dp)
                 .clip(CircleShape)
-                .background(Color.White),
+                .background(Color.White)
+                // Hairline so the white knob stays defined against the light-grey off-track.
+                .border(1.dp, if (on) Color.Transparent else K.line2, CircleShape),
         )
     }
 }

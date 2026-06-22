@@ -70,11 +70,13 @@ class SettingsActivity : ComponentActivity() {
         val autoPair = intent?.getBooleanExtra(EXTRA_AUTO_PAIR, false) == true
         setContent {
             // The Karoo 3 panel is 480×800 px at 300 dpi (1.875×), i.e. only ~256 dp wide. The
-            // design is authored in 480×800 *px*, so we pin density to 1 (1 dp == 1 px) and
-            // fontScale to 1 for this UI — the dp/sp values then match the design's px exactly
-            // and the 480-wide canvas matches the screen. A fixed-purpose device with one known
+            // design is authored in 480×800 *px*, so we pin density to 1 (1 dp == 1 px) so the
+            // 480-wide canvas matches the screen. fontScale is bumped to 1.2 so every sp text reads
+            // larger than the (cramped) design px on this small panel — the layout uses min-heights,
+            // so it absorbs the taller text. The glasses preview overrides this back to fontScale 1
+            // (see LensBox) so the mock stays pixel-accurate. A fixed-purpose device with one known
             // panel is exactly where overriding density is appropriate.
-            CompositionLocalProvider(LocalDensity provides Density(1f, 1f)) {
+            CompositionLocalProvider(LocalDensity provides Density(1f, 1.2f)) {
                 SettingsRoot(autoPair = autoPair)
             }
         }
