@@ -112,6 +112,9 @@ private fun demoFor(spec: com.eider.karoomaverickhud.extension.FieldSpec): DemoV
         com.eider.karoomaverickhud.extension.FieldKind.STEPS -> DemoVal("3/12", null)
         com.eider.karoomaverickhud.extension.FieldKind.BALANCE -> DemoVal("51/49", 51.0)
         com.eider.karoomaverickhud.extension.FieldKind.GEARS -> DemoVal("50/14", null)
+        com.eider.karoomaverickhud.extension.FieldKind.DELTA_TIME -> DemoVal("-0:04", -4000.0)
+        com.eider.karoomaverickhud.extension.FieldKind.GRADE -> DemoVal("7.2", 7.2)
+        com.eider.karoomaverickhud.extension.FieldKind.CLIMB_STEPS -> DemoVal("2/3", null)
     }
 }
 
@@ -127,7 +130,7 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
         Spacer(Modifier.height(1.dp))
         return
     }
-    val field = UI_FIELDS[fieldId]
+    val field = uiFieldFor(fieldId)
     val demo = values[fieldId]
     val color = cellColor(field, demo, cfg)
     val label = field?.unit?.takeIf { it.isNotEmpty() } ?: field?.label ?: ""
@@ -270,7 +273,7 @@ private fun EditSlot(
     right: Boolean = false,
 ) {
     val fieldId = page.getOrNull(i)
-    val field = fieldId?.let { UI_FIELDS[it] }
+    val field = fieldId?.let { uiFieldFor(it) }
     val isAdd = fieldId == null && i == page.size
     val sel = selected == i
     val demo = fieldId?.let { values[it] }

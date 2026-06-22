@@ -48,14 +48,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var deviceProvider: MaverickDeviceProvider
     private lateinit var rideStateFlow: StateFlow<RideState>
 
-    // In-ride field that shows Maverick connection status and current brightness. Reads the
+    // In-ride field that shows the Maverick at a glance (battery, signal, brightness). Reads the
     // process-wide GlassesLinkState, so it needs no reference to [maverick]; a tap broadcasts
-    // [ACTION_CYCLE_BRIGHTNESS] back to us.
+    // [ACTION_GLASSES_TAP] back to us.
     override val types by lazy { listOf(GlassesDataType(extension)) }
 
-    private val cycleBrightnessReceiver = object : BroadcastReceiver() {
+    private val glassesTapReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (::maverick.isInitialized) maverick.cycleBrightness()
+            if (!::maverick.isInitialized) return
+            // Context-aware: brightness when connected, reconnect when down, pair when never paired.
+            if (maverick.onFieldTap() == MaverickBridge.TapResult.NEEDS_PAIR) openSettings(autoPair = true)
         }
     }
 
@@ -74,14 +76,14 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         rideStateFlow = karoo.consumerFlow<RideState>()
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
-        // The bridge gates the glasses link on ride state — held while recording/paused, released
-        // when idle — so it needs the same ride-state feed the pipeline uses.
+        // The bridge keeps the link always-connected (not ride-gated); it uses the ride-state feed
+        // only to re-arm its fast connect-retry window when a ride starts.
         maverick.start(rideStateFlow)
 
         ContextCompat.registerReceiver(
             this,
-            cycleBrightnessReceiver,
-            IntentFilter(ACTION_CYCLE_BRIGHTNESS),
+            glassesTapReceiver,
+            IntentFilter(ACTION_GLASSES_TAP),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
@@ -124,7 +126,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
-        runCatching { unregisterReceiver(cycleBrightnessReceiver) }
+        runCatching { unregisterReceiver(glassesTapReceiver) }
         scope.cancel()
         maverick.shutdown()
         karoo.disconnect()
@@ -132,8 +134,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     companion object {
-        /** Broadcast sent by a tap on the Karoo data field to cycle glasses brightness. */
-        const val ACTION_CYCLE_BRIGHTNESS = "com.eider.karoomaverickhud.CYCLE_BRIGHTNESS"
+        /** Broadcast sent by a tap on the Karoo data field — cycles brightness when connected, else reconnects/pairs. */
+        const val ACTION_GLASSES_TAP = "com.eider.karoomaverickhud.GLASSES_TAP"
     }
 
     /**
@@ -157,10 +159,31 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, false)
 
+        // A Strava live segment is running (segment fields stream a positive distance-remaining only
+        // while on a segment). Gates and pins the segment auto-page.
+        val segmentActiveFlow = karoo.streamDataFlow(DataType.Type.SEGMENT_DISTANCE_REMAINING)
+            .map { FieldFormat.segmentActive(it) }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+        // On a climb (Karoo ClimbPro) — distance/elevation-to-top stream positive only on a climb.
+        // Gates and pins the climb auto-page, which only shows when no segment is running.
+        val climbActiveFlow = karoo.streamDataFlow(DataType.Type.CLIMB)
+            .map { FieldFormat.climbActive(it) }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+        // Display labels for any extension-provided fields the rider added to a page (MPA, time to
+        // summit, …) so the generic renderer can unit-label them. Discovered once at start.
+        val extLabels = KarooDataTypeCatalog.labels(applicationContext)
+
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row
         // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
-        // use the user's custom pages. A live workout prepends the configured workout page.
-        val layoutFlow = combine(configFlow, activePageFlow, workoutActiveFlow) { cfg, active, workoutActive ->
+        // use the user's custom pages. A live workout prepends the configured workout page; a live
+        // Strava segment or climb prepends its page and pins the display to it (segment wins).
+        val layoutFlow = combine(
+            configFlow, activePageFlow, workoutActiveFlow, segmentActiveFlow, climbActiveFlow,
+        ) { cfg, active, workoutActive, segmentActive, climbActive ->
             val cap = cellsForRows(cfg.rows)
             val base = if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
                 val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
@@ -168,52 +191,68 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             } else {
                 cfg.pages.asSequence().map { it.take(cap) }.filter { it.isNotEmpty() }.toList()
             }
-            if (workoutActive && cfg.workoutPage.isNotEmpty()) listOf(cfg.workoutPage.take(cap)) + base else base
+            val priority = mutableListOf<List<String>>()
+            var pinned: Int? = null
+            if (workoutActive && cfg.workoutPage.isNotEmpty()) priority.add(cfg.workoutPage.take(cap))
+            if (segmentActive && cfg.segmentPage.isNotEmpty()) {
+                pinned = priority.size
+                priority.add(cfg.segmentPage.take(cap))
+            } else if (climbActive && cfg.climbPage.isNotEmpty()) {
+                pinned = priority.size
+                priority.add(cfg.climbPage.take(cap))
+            }
+            Layout(priority + base, pinned)
         }.distinctUntilChanged()
 
-        // Re-evaluated when the (configurable) refresh interval changes so the setting actually
-        // takes effect — previously it was read once at flow assembly and pinned for the session.
-        val refreshMsFlow = configFlow.map { it.refreshIntervalMs }.distinctUntilChanged()
-
-        refreshMsFlow.flatMapLatest { refreshMs ->
-            layoutFlow.flatMapLatest { layout ->
-                // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
-                // CADENCE colouring needs the live power reading for its under-gear rule, and the
-                // live POWER/CADENCE fields need their workout target streams to render
-                // "value/target" mid-workout even when no target field is on a page. The target
-                // streams are Idle outside a workout, so the extra subscriptions cost nothing.
-                val displayed = layout.asSequence().flatten().distinct().toList()
-                val ids = buildList {
-                    addAll(displayed)
-                    if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
-                    if (DataType.Type.POWER in displayed && DataType.Type.WORKOUT_POWER_TARGET !in displayed) add(DataType.Type.WORKOUT_POWER_TARGET)
-                    if (DataType.Type.CADENCE in displayed && DataType.Type.WORKOUT_CADENCE_TARGET !in displayed) add(DataType.Type.WORKOUT_CADENCE_TARGET)
-                }
-                val cellsFlow = if (ids.isEmpty()) {
-                    flowOf(emptyMap())
-                } else {
-                    // One context per layout subscription — carries the last power reading and the
-                    // under-gear dwell timer that the cadence colour rule needs. Re-created on every
-                    // layout change so a page swap doesn't leak a stale timer.
-                    val ctx = FormatContext()
-                    val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
-                    merge(*streams.toTypedArray())
-                        .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
-                            val cfg = configFlow.value
-                            val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
-                            val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
-                            acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear))
-                        }
-                }
-                cellsFlow.map { cells -> layout to cells }
-            }.sample(refreshMs)
+        val cellsPipeline = layoutFlow.flatMapLatest { layout ->
+            // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
+            // CADENCE colouring needs the live power reading for its under-gear rule, and the
+            // live POWER/CADENCE fields need their workout target streams to render
+            // "value/target" mid-workout even when no target field is on a page. The target
+            // streams are Idle outside a workout, so the extra subscriptions cost nothing.
+            val displayed = layout.pages.asSequence().flatten().distinct().toList()
+            val ids = buildList {
+                addAll(displayed)
+                if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
+                if (DataType.Type.POWER in displayed && DataType.Type.WORKOUT_POWER_TARGET !in displayed) add(DataType.Type.WORKOUT_POWER_TARGET)
+                if (DataType.Type.CADENCE in displayed && DataType.Type.WORKOUT_CADENCE_TARGET !in displayed) add(DataType.Type.WORKOUT_CADENCE_TARGET)
+            }
+            val cellsFlow = if (ids.isEmpty()) {
+                flowOf(emptyMap())
+            } else {
+                // One context per layout subscription — carries the last power reading and the
+                // under-gear dwell timer that the cadence colour rule needs. Re-created on every
+                // layout change so a page swap doesn't leak a stale timer.
+                val ctx = FormatContext()
+                val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
+                merge(*streams.toTypedArray())
+                    .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
+                        val cfg = configFlow.value
+                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
+                        val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
+                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear, extLabels))
+                    }
+            }
+            cellsFlow.map { cells -> layout to cells }
         }
+
+        // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
+        // low-battery tiers (BatteryWarn) cut the BLE/redraw load that drains it faster. A change
+        // re-subscribes the streams (same as a layout swap), so it only churns on a config change
+        // or a battery threshold crossing — both rare. (This also makes the configured refresh
+        // interval take effect live, superseding the earlier captured-once read.)
+        val refreshFlow = combine(configFlow, maverick.glassesBattery) { cfg, battery ->
+            BatteryWarn.forLevel(battery)?.pollMs ?: cfg.refreshIntervalMs
+        }.distinctUntilChanged()
+
+        refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) }
             .combine(rideStateFlow) { (layout, cells), ride ->
                 HudSnapshot(
-                    pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
+                    pages = layout.pages.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
+                    pinnedPage = layout.pinnedPage,
                     rows = configFlow.value.rows,
                     clock = if (configFlow.value.showClock) currentClock() else "",
                     showIcons = configFlow.value.showIcons,
@@ -223,6 +262,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
     }
+
+    /** A computed page layout: the pages to show plus an optional page to pin (segment/climb). */
+    private data class Layout(val pages: List<List<String>>, val pinnedPage: Int?)
 
     /** Current time of day as "HH:mm" from the Karoo's clock, for the HUD's top-left corner. */
     private fun currentClock(): String {

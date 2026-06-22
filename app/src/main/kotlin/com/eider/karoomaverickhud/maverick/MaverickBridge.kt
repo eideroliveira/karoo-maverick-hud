@@ -28,13 +28,18 @@ import timber.log.Timber
  */
 object GlassesLinkState {
     val connected = MutableStateFlow(value = false)
+    /** True while the SDK is mid-connect (paired but link not yet up) — shown as "Reconnecting…". */
+    val connecting = MutableStateFlow(value = false)
     /** Current display brightness 0..100, null when disconnected/unknown. */
     val brightness = MutableStateFlow<Int?>(value = null)
     /** True when the glasses' auto-brightness is enabled (overrides the manual level). */
     val autoBrightness = MutableStateFlow(value = false)
-    /** Latest glasses battery %, null when disconnected/unknown. Mirrored for the Karoo sensor
-     *  report (see [com.eider.karoomaverickhud.extension.MaverickDeviceProvider]). */
+    /** Glasses battery 0..100, null when disconnected/unknown — the ride-limiting resource. Also
+     *  mirrored for the Karoo sensor report (see
+     *  [com.eider.karoomaverickhud.extension.MaverickDeviceProvider]). */
     val battery = MutableStateFlow<Int?>(value = null)
+    /** BLE signal as 0..3 bars (RSSI-derived); 0 when disconnected or not yet read. */
+    val signal = MutableStateFlow(value = 0)
 }
 
 /**
@@ -79,26 +84,33 @@ class MaverickBridge(
     @Volatile private var pageIndex: Int = 0
     @Volatile private var lastSnapshot: HudSnapshot = HudSnapshot.empty
 
+    // The pinned-page index from the last snapshot, so we snap to a segment/climb page only on the
+    // rising edge (and when the pin changes) rather than yanking back every tick — the rider can
+    // still flip away mid-segment. Null means nothing is pinned.
+    @Volatile private var lastPinnedPage: Int? = null
+
     // The last snapshot the ride pipeline produced (as opposed to a preview frame). Used to snap
     // the glasses straight back to realtime when an open settings preview clears, so we don't sit
     // on a stale demo frame waiting for the next pipeline tick (which may not come if the ride is
     // paused and no sensors are emitting).
     @Volatile private var lastRideSnapshot: HudSnapshot? = null
 
-    // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
-    @Volatile private var glassesBattery: Int? = null
-    // Wall-clock of the last over-the-air battery read, so we can refresh it on a slow cadence
+    // Latest glasses battery %, refreshed by the connection loop; null when disconnected. Exposed as
+    // a flow so the ride pipeline can slow its refresh as the battery drains (see BatteryWarn).
+    private val _glassesBattery = MutableStateFlow<Int?>(value = null)
+    val glassesBattery: StateFlow<Int?> = _glassesBattery.asStateFlow()
+    // Wall-clock of the last over-the-air battery read, so we refresh it on a slow cadence
     // (battery moves ~1%/min) instead of every liveness tick.
     private var lastBatteryReadAt = 0L
 
     // Ride state, supplied by the extension via [start]. We don't gate the link on it; it only
-    // re-arms the connect window when a ride starts (so a give-up earlier in the day still
-    // reconnects for the ride).
+    // re-arms the fast-retry window when a ride starts (so a backed-off link reconnects promptly).
     private var rideState: StateFlow<RideState>? = null
 
-    // Wall-clock deadline for connect attempts. We keep retrying a paired-but-absent device only
-    // until this passes, then give up (stop hammering the BLE radio) until something re-arms it —
-    // a fresh process start, a drop after a successful connect, a ride starting, or a live preview.
+    // Wall-clock deadline for the *fast* connect-retry window. Past it the loop keeps retrying but
+    // at the slow idle cadence, so a paired-but-absent device stops hammering the BLE radio while
+    // still recovering on its own. Re-armed on a fresh start, a drop after a good connect, a ride
+    // start, or a live preview.
     @Volatile private var retryUntil = 0L
 
     // Centre control-window state (toggled by long-tap). Brightness 0..100, signal 0..3 bars.
@@ -160,9 +172,15 @@ class MaverickBridge(
         // While the settings app is pushing a live preview, it owns the glasses — ignore the
         // ride pipeline so the two don't fight over the screen.
         if (HudState.previewSnapshot.value != null) return
+        // A live segment/climb page takes over: snap to it on the rising edge (and when the pinned
+        // page changes, e.g. segment→climb), then leave the rider free to flip while it stays
+        // pinned. Cleared pins resume normal cycling without a snap.
+        val pin = snapshot.pinnedPage
+        if (pin != null && pin != lastPinnedPage && pin < snapshot.pages.size) pageIndex = pin
+        lastPinnedPage = pin
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
+        val stamped = snapshot.copy(pageIndex = pageIndex, battery = _glassesBattery.value)
         lastRideSnapshot = stamped
         // Skip redundant pushes: when idle/paused or the sensors are steady, the pipeline keeps
         // ticking out identical frames that would otherwise re-flush the glasses every interval.
@@ -176,14 +194,14 @@ class MaverickBridge(
         scope.launch {
             HudState.previewSnapshot.collect { preview ->
                 if (preview != null) {
-                    publish(preview.copy(battery = glassesBattery))
+                    publish(preview.copy(battery = _glassesBattery.value))
                     mountScreenIfNeeded()
                 } else {
                     // Preview cleared (settings backgrounded/closed): restore the last ride frame
                     // immediately so the glasses snap back to realtime instead of holding the demo
                     // frame until — or unless — the ride pipeline emits again.
                     lastRideSnapshot?.let {
-                        publish(it.copy(battery = glassesBattery))
+                        publish(it.copy(battery = _glassesBattery.value))
                         mountScreenIfNeeded()
                     }
                 }
@@ -319,20 +337,24 @@ class MaverickBridge(
     }
 
     /**
-     * Connect to the paired glasses and keep them connected, mirroring link state for the UI. The
-     * link is *not* ride-gated: once up it stays up (reconnecting on drops). What's bounded is the
-     * *attempting* — we only fire connects while inside the [retryUntil] window, so a paired device
-     * that's simply absent (left at home, powered off) isn't hammered forever. A successful connect,
-     * a subsequent drop, a live preview, or a ride start all re-open the window.
+     * Connect to the paired glasses and keep them connected, mirroring link state for the UI (the
+     * status-tile data field reads [GlassesLinkState]). The link is *not* ride-gated: once up it
+     * stays up, reconnecting on drops.
      *
-     * Battery care kept from the earlier pass: the over-the-air reads (brightness, auto, RSSI) run
-     * only when something shows them (control window open, or just-connected seeding), and battery %
-     * refreshes on a slow cadence ([BATTERY_INTERVAL_MS]). Base cadence scales with need.
+     * Reconnect cadence is bounded to spare the Karoo's battery. After a fresh start, a drop, a ride
+     * start, or a live preview we fast-retry for [CONNECT_WINDOW_MS]; past that the loop keeps
+     * retrying but at the slow [IDLE_POLL_INTERVAL_MS] cadence, so a pair that's been switched off
+     * stops the futile fast scans yet still reconnects on its own when it comes back.
+     *
+     * The over-the-air reads are also trimmed: brightness/auto are seeded on connect and re-read
+     * only while the control window is open (the user is the only thing that changes them), and
+     * battery % refreshes on a slow cadence ([BATTERY_INTERVAL_MS]). RSSI is read each connected
+     * tick since the signal bars feed both the control window and the data-field tile.
      */
     private fun startConnectionLoop() {
         connectionJob = scope.launch {
             while (isActive) {
-                var nextDelay = IDLE_INTERVAL_MS
+                var nextDelay = IDLE_POLL_INTERVAL_MS
                 runCatching {
                     val comm = Evs.instance().comm()
                     val wasConnected = _connectionState.value
@@ -345,23 +367,27 @@ class MaverickBridge(
                         if (!connected) screenMounted = false
                     }
                     // A drop after a good connection is a transient (out of range, glasses slept) —
-                    // re-arm so we actively work to get back, rather than honouring a window that may
-                    // already have expired during a long ride.
+                    // re-arm the fast-retry window so we work to get back promptly.
                     if (justDropped) armRetry()
+                    // "Reconnecting…" state for the data-field status tile.
+                    GlassesLinkState.connecting.value =
+                        !connected && runCatching { comm.isConnecting() }.getOrDefault(false)
 
                     if (connected) {
-                        // Battery for the HUD corner: refresh on a slow cadence, plus once on connect.
+                        // Battery (ride-limiting resource + status tile + BatteryWarn slowdown):
+                        // refresh on a slow cadence plus once on connect — it moves ~1%/min.
                         val now = System.currentTimeMillis()
                         if (justConnected || now - lastBatteryReadAt >= BATTERY_INTERVAL_MS) {
-                            glassesBattery = runCatching { Evs.instance().glasses().batteryPercentage() }
+                            val pct = runCatching { Evs.instance().glasses().batteryPercentage() }
                                 .getOrNull()?.takeIf { it in 0..100 }
-                            GlassesLinkState.battery.value = glassesBattery
+                            _glassesBattery.value = pct
+                            GlassesLinkState.battery.value = pct
                             lastBatteryReadAt = now
                         }
-                        // Brightness/auto mirror for the Karoo data field. Only the user changes
-                        // these (via the control window / data-field tap, which write the mirror
-                        // directly), so we just seed once on connect and re-read while the control
-                        // window is open — no need to poll the glasses for them every tick.
+                        // Brightness/auto mirror for the data field. Only the user changes these (via
+                        // the control window / data-field tap, which write the mirror directly), so
+                        // seed once on connect and re-read while the control window is open — no need
+                        // to poll the glasses for them every tick.
                         if (justConnected || controlOpen) {
                             val b = runCatching { Evs.instance().display().getBrightness().toInt() }
                                 .getOrNull()?.takeIf { it in 0..100 }
@@ -374,31 +400,31 @@ class MaverickBridge(
                             ctrlAuto = a
                             GlassesLinkState.autoBrightness.value = a
                         }
-                        // Signal bars are only drawn inside the control window — read RSSI solely
-                        // while it's open.
-                        if (controlOpen) {
-                            runCatching {
-                                comm.requestRssiRead { rssi ->
-                                    ctrlSignal = rssiToBars(rssi)
-                                    if (controlOpen) pushControl()
-                                }
+                        // Signal bars feed both the control window and the data-field tile, so keep
+                        // RSSI fresh every connected tick (one cheap read at the connected cadence).
+                        runCatching {
+                            comm.requestRssiRead { rssi ->
+                                ctrlSignal = rssiToBars(rssi)
+                                GlassesLinkState.signal.value = ctrlSignal
+                                if (controlOpen) pushControl()
                             }
                         }
                     } else {
-                        glassesBattery = null
+                        _glassesBattery.value = null
                         GlassesLinkState.battery.value = null
                         GlassesLinkState.brightness.value = null
                         GlassesLinkState.autoBrightness.value = false
+                        GlassesLinkState.signal.value = 0
                     }
-
-                    // A live preview wants the link regardless of the retry window (the rider is in
-                    // settings expecting to see the glasses); otherwise only attempt while armed.
+                    // The fast-retry window covers a live preview (rider in settings, wants the link
+                    // now) and the bounded window after a start/drop/ride. Past it we still attempt,
+                    // just at the slow idle cadence chosen below.
                     val previewing = HudState.previewSnapshot.value != null
-                    val mayAttempt = previewing || System.currentTimeMillis() < retryUntil
+                    val armed = previewing || System.currentTimeMillis() < retryUntil
 
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
-                    if (mayAttempt && pairedId != null && !connected && !comm.isConnecting()) {
+                    if (pairedId != null && !connected && !comm.isConnecting()) {
                         // The SDK can lose its configured device across process restarts; restore
                         // it from our prefs so a ride reliably reconnects instead of sitting idle.
                         if (!comm.hasConfiguredDevice()) {
@@ -415,8 +441,8 @@ class MaverickBridge(
                     nextDelay = when {
                         controlOpen -> CONTROL_INTERVAL_MS       // responsive brightness/signal
                         connected -> CONNECTED_INTERVAL_MS       // hold the link, catch drops
-                        mayAttempt -> CONNECT_RETRY_INTERVAL_MS  // actively trying to connect
-                        else -> IDLE_INTERVAL_MS                 // gave up; just tick over cheaply
+                        armed -> CONNECT_RETRY_INTERVAL_MS       // fast retry within the window
+                        else -> IDLE_POLL_INTERVAL_MS            // backed off; slow retry, still recovers
                     }
                 }.onFailure { Timber.w(it, "connection loop error") }
                 delay(nextDelay)
@@ -444,6 +470,7 @@ class MaverickBridge(
                 val cfg = configState.value
                 delay(cfg.autoCycleMs.coerceAtLeast(1_000L))
                 if (HudState.previewSnapshot.value != null) continue // preview owns paging
+                if (lastSnapshot.pinnedPage != null) continue // a segment/climb page is pinned
                 if (configState.value.pageMode == PageMode.AUTO) {
                     val count = lastSnapshot.pages.size
                     if (count > 1) {
@@ -455,17 +482,56 @@ class MaverickBridge(
         }
     }
 
+    /** Outcome of a data-field tap, so the extension knows whether it must open the pair UI. */
+    enum class TapResult { BRIGHTNESS, RECONNECTING, NEEDS_PAIR }
+
+    /**
+     * Single tap on the Karoo data field. Context-aware: cycle brightness while connected,
+     * otherwise kick an immediate reconnect — or report NEEDS_PAIR if nothing is paired yet so
+     * the extension can open the pair flow.
+     */
+    fun onFieldTap(): TapResult {
+        if (_connectionState.value) {
+            cycleBrightness()
+            return TapResult.BRIGHTNESS
+        }
+        if (configState.value.maverickDeviceId == null) return TapResult.NEEDS_PAIR
+        forceReconnect()
+        return TapResult.RECONNECTING
+    }
+
+    /**
+     * Re-assert the paired device and issue a secured connect, unless a link is already up or
+     * forming. The connection loop also auto-reconnects every couple of seconds; this is the
+     * rider's immediate "try now" so a drop doesn't feel like it's hanging.
+     */
+    private fun forceReconnect() {
+        scope.launch {
+            runCatching {
+                val comm = Evs.instance().comm()
+                if (comm.isConnected() || comm.isConnecting()) return@launch
+                val cfg = configState.value
+                val id = cfg.maverickDeviceId ?: return@launch
+                if (!comm.hasConfiguredDevice()) comm.setDeviceInfo(id, cfg.maverickDeviceName ?: "")
+                if (comm.hasConfiguredDevice()) {
+                    Timber.i("Manual reconnect from data-field tap")
+                    comm.connectSecured()
+                }
+            }.onFailure { Timber.w(it, "manual reconnect failed") }
+        }
+    }
+
     companion object {
-        /** How long to keep attempting a connect before giving up on an absent device. */
+        /** How long to fast-retry a connect before backing off to the slow idle cadence. */
         private const val CONNECT_WINDOW_MS = 3 * 60_000L
         /** Snappy cadence while the control window is open (live brightness/signal feedback). */
         private const val CONTROL_INTERVAL_MS = 1_000L
         /** Connected: hold the link and notice a drop reasonably quickly. */
         private const val CONNECTED_INTERVAL_MS = 4_000L
-        /** Disconnected but still armed: retry briskly so the link comes up fast. */
+        /** Disconnected but still inside the fast-retry window: retry briskly. */
         private const val CONNECT_RETRY_INTERVAL_MS = 2_000L
-        /** Gave up (window elapsed, device absent): just keep the loop alive cheaply. */
-        private const val IDLE_INTERVAL_MS = 10_000L
+        /** Backed-off retry cadence once the fast window passes (still recovers on its own). */
+        private const val IDLE_POLL_INTERVAL_MS = 30_000L
         /** How often to refresh the glasses battery % over the air; it moves ~1%/min. */
         private const val BATTERY_INTERVAL_MS = 60_000L
     }

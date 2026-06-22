@@ -7,22 +7,24 @@
     android:gravity="center"
     android:padding="4dp">
 
+    <!-- Top line: brightness + signal bars when connected, link status when not. -->
     <TextView
-        android:id="@+id/gf_status"
+        android:id="@+id/gf_top"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:textColor="@android:color/white"
+        android:textColor="#B0B0B0"
         android:textStyle="bold"
-        android:textSize="14sp" />
+        android:textSize="13sp" />
 
+    <!-- Main line: glasses battery % (coloured by level), or the tap hint when disconnected. -->
     <TextView
-        android:id="@+id/gf_brightness"
+        android:id="@+id/gf_main"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
         android:gravity="center"
         android:textColor="@android:color/white"
         android:textStyle="bold"
-        android:textSize="24sp" />
+        android:textSize="26sp" />
 </LinearLayout>

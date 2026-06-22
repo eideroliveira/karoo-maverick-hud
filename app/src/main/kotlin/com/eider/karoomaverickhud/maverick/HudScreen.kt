@@ -13,6 +13,7 @@ import UIKit.widgets.Image
 import UIKit.widgets.Rect
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
+import com.eider.karoomaverickhud.extension.BatteryWarn
 import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudIcon
@@ -100,6 +101,7 @@ class HudScreen : Screen(420f, 150f) {
     private val pauseDot = Text()
     private val clockText = Text() // time of day (shown inside the control window)
     private val batteryText = Text() // glasses battery % (shown inside the control window)
+    private val batteryWarnText = Text() // low-battery % overlaid top-centre, tinted by BatteryWarn tier
 
     // One ImgSrc per glyph (each gets its own glasses image slot). Drawn only when the rider
     // enables HUD icons (HudSnapshot.showIcons).
@@ -176,6 +178,17 @@ class HudScreen : Screen(420f, 150f) {
             .setTextAlign(Align.center)
             .setXY(getWidth() / 2f, 4f)
             .setForegroundColor(EvsColor.Green.rgba)
+            .addTo(this)
+
+        // Low-battery readout: hugs the very top centre, above the pause/status marker (which drops
+        // a line while this is visible). Hidden until the glasses battery falls into a BatteryWarn tier.
+        batteryWarnText
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(getWidth() / 2f, 4f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
             .addTo(this)
 
         // Time and battery live inside the centre control window, hidden until it opens.
@@ -258,6 +271,7 @@ class HudScreen : Screen(420f, 150f) {
         lastControlSignature = controlSig
 
         renderControlWindow(snap)
+        renderBatteryWarning(snap)
 
         // The glasses are see-through, so the control window can't occlude — clear the HUD
         // behind it instead, leaving only the window legible.
@@ -284,6 +298,25 @@ class HudScreen : Screen(420f, 150f) {
             if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
+    }
+
+    /**
+     * Top-centre low-battery readout. Shows the glasses battery % tinted by its [BatteryWarn] tier
+     * (yellow ≤30, orange ≤20, red ≤10) and nudges the pause/status marker down a line so the two
+     * don't share the top edge; hidden entirely when the battery is healthy or unknown.
+     */
+    private fun renderBatteryWarning(snap: HudSnapshot) {
+        val warn = BatteryWarn.forLevel(snap.battery)
+        if (warn == null) {
+            batteryWarnText.setText("").setVisibility(false)
+            pauseDot.setXY(getWidth() / 2f, 4f)
+        } else {
+            batteryWarnText
+                .setText("${snap.battery}%")
+                .setForegroundColor(colorRgba(warn.color))
+                .setVisibility(true)
+            pauseDot.setXY(getWidth() / 2f, 26f)
+        }
     }
 
     /** Render one cell: value on top, unit/label (+ optional icon) below, tinted by the zone colour. */
