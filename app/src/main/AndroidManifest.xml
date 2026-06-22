@@ -19,6 +19,15 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- Android 11+ (API 30+) package visibility: without this, queryIntentServices can't see
+         other apps' Karoo extension services, so KarooDataTypeCatalog.discover() comes back empty
+         and the field picker offers no extension/sensor-provided fields (MPA, time to summit, …). -->
+    <queries>
+        <intent>
+            <action android:name="io.hammerhead.karooext.KAROO_EXTENSION" />
+        </intent>
+    </queries>
+
     <application
         android:name=".KHudApplication"
         android:allowBackup="true"
