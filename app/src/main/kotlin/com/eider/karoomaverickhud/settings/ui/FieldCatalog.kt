@@ -37,9 +37,10 @@ private fun iconName(kind: FieldKind): String = when (kind) {
     FieldKind.CADENCE -> "cadence"
     FieldKind.SPEED -> "speed"
     FieldKind.DISTANCE -> "distance"
-    FieldKind.TIME, FieldKind.INTERVAL_TIME, FieldKind.STEPS -> "time"
+    FieldKind.TIME, FieldKind.INTERVAL_TIME, FieldKind.STEPS, FieldKind.DELTA_TIME -> "time"
     FieldKind.BALANCE -> "balance"
     FieldKind.GEARS -> "gear"
+    FieldKind.GRADE, FieldKind.CLIMB_STEPS -> "distance"
     FieldKind.RATIO, FieldKind.NUMBER -> "bolt"
 }
 
@@ -66,6 +67,18 @@ val UI_FIELDS: Map<String, UiField> = FIELD_SPECS.associate { spec ->
     spec.id to UiField(spec.id, spec.label, uiUnit(spec), iconName(spec.kind), zoneKind(spec.kind))
 }
 
+/**
+ * Fields provided by other installed extensions (MPA, time to summit, …), discovered at runtime and
+ * populated by the settings screen so the field picker and the lens preview can resolve them. Empty
+ * until discovery runs; the built-in [UI_FIELDS] are always the defaults.
+ */
+object ExtensionFieldRegistry {
+    @Volatile var fields: Map<String, UiField> = emptyMap()
+}
+
+/** Look up a pickable field by id, falling back from the built-in catalog to discovered extensions. */
+fun uiFieldFor(id: String): UiField? = UI_FIELDS[id] ?: ExtensionFieldRegistry.fields[id]
+
 /** Picker grouping (name → field ids). */
 val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
     "Power" to listOf(DataType.Type.POWER, DataType.Type.AVERAGE_POWER, DataType.Type.MAX_POWER, DataType.Type.NORMALIZED_POWER),
@@ -78,6 +91,14 @@ val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
     "Last lap" to listOf(DataType.Type.DISTANCE_LAP_LAST_LAP, DataType.Type.AVERAGE_SPEED_LAST_LAP, DataType.Type.AVERAGE_POWER_LAST_LAP, DataType.Type.NORMALIZED_POWER_LAST_LAP, DataType.Type.AVERAGE_HR_LAST_LAP, DataType.Type.AVERAGE_CADENCE_LAST_LAP),
     "Training" to listOf(DataType.Type.INTENSITY_FACTOR, DataType.Type.VARIABILITY_INDEX, DataType.Type.TRAINING_STRESS_SCORE),
     "Drivetrain" to listOf(DataType.Type.SHIFTING_GEARS, DataType.Type.PEDAL_POWER_BALANCE),
+    "Strava segment" to listOf(
+        DataType.Type.SEGMENT_TIME_TO_PR, DataType.Type.SEGMENT_TIME_TO_KOM, DataType.Type.SEGMENT_TIME,
+        DataType.Type.SEGMENT_PR, DataType.Type.SEGMENT_DISTANCE_REMAINING, DataType.Type.SEGMENT_ELEVATION_REMAINING,
+    ),
+    "Climb" to listOf(
+        DataType.Type.ELEVATION_GRADE, DataType.Type.VERTICAL_SPEED, DataType.Type.DISTANCE_TO_TOP,
+        DataType.Type.ELEVATION_TO_TOP, DataType.Type.CLIMB_NUMBER,
+    ),
 )
 
 /** Icon colour used next to a field in the picker — tinted by its zone kind. */

@@ -75,6 +75,11 @@ class MaverickBridge(
     @Volatile private var pageIndex: Int = 0
     @Volatile private var lastSnapshot: HudSnapshot = HudSnapshot.empty
 
+    // The pinned-page index from the last snapshot, so we snap to a segment/climb page only on the
+    // rising edge (and when the pin changes) rather than yanking back every tick — the rider can
+    // still flip away mid-segment. Null means nothing is pinned.
+    @Volatile private var lastPinnedPage: Int? = null
+
     // The last snapshot the ride pipeline produced (as opposed to a preview frame). Used to snap
     // the glasses straight back to realtime when an open settings preview clears, so we don't sit
     // on a stale demo frame waiting for the next pipeline tick (which may not come if the ride is
@@ -108,6 +113,12 @@ class MaverickBridge(
         // While the settings app is pushing a live preview, it owns the glasses — ignore the
         // ride pipeline so the two don't fight over the screen.
         if (HudState.previewSnapshot.value != null) return
+        // A live segment/climb page takes over: snap to it on the rising edge (and when the pinned
+        // page changes, e.g. segment→climb), then leave the rider free to flip while it stays
+        // pinned. Cleared pins resume normal cycling without a snap.
+        val pin = snapshot.pinnedPage
+        if (pin != null && pin != lastPinnedPage && pin < snapshot.pages.size) pageIndex = pin
+        lastPinnedPage = pin
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
         val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
@@ -351,6 +362,7 @@ class MaverickBridge(
                 val cfg = configState.value
                 delay(cfg.autoCycleMs.coerceAtLeast(1_000L))
                 if (HudState.previewSnapshot.value != null) continue // preview owns paging
+                if (lastSnapshot.pinnedPage != null) continue // a segment/climb page is pinned
                 if (configState.value.pageMode == PageMode.AUTO) {
                     val count = lastSnapshot.pages.size
                     if (count > 1) {

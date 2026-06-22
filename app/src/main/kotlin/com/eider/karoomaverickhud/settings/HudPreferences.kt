@@ -56,6 +56,16 @@ data class HudConfig(
      * page, but it can't be removed or reordered; it simply doesn't render outside a workout.
      */
     val workoutPage: List<String>,
+    /**
+     * The Strava-segment page's fields — shown and pinned automatically while a live segment is
+     * running. Editable like the workout page; doesn't render outside a segment.
+     */
+    val segmentPage: List<String>,
+    /**
+     * The climb page's fields — shown and pinned automatically while on a climb when no Strava
+     * segment is running. Editable like the workout page; doesn't render off a climb.
+     */
+    val climbPage: List<String>,
     /** Rows of fields per glasses column (2 or 3); each page holds 2 columns × this many. */
     val rows: Int,
     /** Training-zone thresholds for value coloring (0 disables that field's coloring). */
@@ -94,6 +104,34 @@ data class HudConfig(
             DataType.Type.HEART_RATE,
         )
 
+        /**
+         * Seeded Strava-segment page. Built-in fields by default (Δ-vs-PR, power, cadence, segment
+         * time & distance/elevation remaining); the rider can swap in extension fields such as MPA
+         * or time-to-summit via the picker. Slot order TL-TR-BL-BR-ML-MR (lens columns draw
+         * 0-4-2 / 1-5-3): left = power, seg-dist, cadence; right = vs-PR, seg-elev, seg-time.
+         */
+        val DEFAULT_SEGMENT_PAGE: List<String> = listOf(
+            DataType.Type.POWER,
+            DataType.Type.SEGMENT_TIME_TO_PR,
+            DataType.Type.CADENCE,
+            DataType.Type.SEGMENT_TIME,
+            DataType.Type.SEGMENT_DISTANCE_REMAINING,
+            DataType.Type.SEGMENT_ELEVATION_REMAINING,
+        )
+
+        /**
+         * Seeded climb page. Grade replaces the segment's "time to summit" cell (per the design);
+         * left = power, dist-to-top, cadence; right = grade, elev-to-top, VAM.
+         */
+        val DEFAULT_CLIMB_PAGE: List<String> = listOf(
+            DataType.Type.POWER,
+            DataType.Type.ELEVATION_GRADE,
+            DataType.Type.CADENCE,
+            DataType.Type.VERTICAL_SPEED,
+            DataType.Type.DISTANCE_TO_TOP,
+            DataType.Type.ELEVATION_TO_TOP,
+        )
+
         val DEFAULT = HudConfig(
             maverickDeviceId = null,
             maverickDeviceName = null,
@@ -103,6 +141,8 @@ data class HudConfig(
             autoCycleMs = 5_000L,
             pages = DEFAULT_PAGES,
             workoutPage = DEFAULT_WORKOUT_PAGE,
+            segmentPage = DEFAULT_SEGMENT_PAGE,
+            climbPage = DEFAULT_CLIMB_PAGE,
             rows = 3,
             ftp = 200,
             maxHr = 185,
@@ -127,6 +167,8 @@ object HudPreferences {
     private val KEY_AUTO_CYCLE_MS = longPreferencesKey("auto_cycle_ms")
     private val KEY_PAGES = stringPreferencesKey("pages_json")
     private val KEY_WORKOUT_PAGE = stringPreferencesKey("workout_page_json")
+    private val KEY_SEGMENT_PAGE = stringPreferencesKey("segment_page_json")
+    private val KEY_CLIMB_PAGE = stringPreferencesKey("climb_page_json")
     private val KEY_ROWS = intPreferencesKey("rows")
     private val KEY_FTP = intPreferencesKey("ftp")
     private val KEY_MAX_HR = intPreferencesKey("max_hr")
@@ -148,6 +190,8 @@ object HudPreferences {
             autoCycleMs = prefs[KEY_AUTO_CYCLE_MS] ?: HudConfig.DEFAULT.autoCycleMs,
             pages = prefs[KEY_PAGES]?.let { decodePages(it) } ?: HudConfig.DEFAULT_PAGES,
             workoutPage = prefs[KEY_WORKOUT_PAGE]?.let { decodeFields(it) } ?: HudConfig.DEFAULT_WORKOUT_PAGE,
+            segmentPage = prefs[KEY_SEGMENT_PAGE]?.let { decodeFields(it) } ?: HudConfig.DEFAULT_SEGMENT_PAGE,
+            climbPage = prefs[KEY_CLIMB_PAGE]?.let { decodeFields(it) } ?: HudConfig.DEFAULT_CLIMB_PAGE,
             rows = (prefs[KEY_ROWS] ?: HudConfig.DEFAULT.rows).coerceIn(MIN_ROWS, MAX_ROWS),
             ftp = prefs[KEY_FTP] ?: HudConfig.DEFAULT.ftp,
             maxHr = prefs[KEY_MAX_HR] ?: HudConfig.DEFAULT.maxHr,
@@ -233,6 +277,14 @@ object HudPreferences {
 
     suspend fun setWorkoutPage(context: Context, fields: List<String>) {
         context.dataStore.edit { it[KEY_WORKOUT_PAGE] = Json.encodeToString(fields) }
+    }
+
+    suspend fun setSegmentPage(context: Context, fields: List<String>) {
+        context.dataStore.edit { it[KEY_SEGMENT_PAGE] = Json.encodeToString(fields) }
+    }
+
+    suspend fun setClimbPage(context: Context, fields: List<String>) {
+        context.dataStore.edit { it[KEY_CLIMB_PAGE] = Json.encodeToString(fields) }
     }
 
     private fun decodePages(json: String): List<List<String>>? =

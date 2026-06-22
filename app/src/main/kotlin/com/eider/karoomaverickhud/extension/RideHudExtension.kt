@@ -132,10 +132,31 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, false)
 
+        // A Strava live segment is running (segment fields stream a positive distance-remaining only
+        // while on a segment). Gates and pins the segment auto-page.
+        val segmentActiveFlow = karoo.streamDataFlow(DataType.Type.SEGMENT_DISTANCE_REMAINING)
+            .map { FieldFormat.segmentActive(it) }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+        // On a climb (Karoo ClimbPro) — distance/elevation-to-top stream positive only on a climb.
+        // Gates and pins the climb auto-page, which only shows when no segment is running.
+        val climbActiveFlow = karoo.streamDataFlow(DataType.Type.CLIMB)
+            .map { FieldFormat.climbActive(it) }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+        // Display labels for any extension-provided fields the rider added to a page (MPA, time to
+        // summit, …) so the generic renderer can unit-label them. Discovered once at start.
+        val extLabels = KarooDataTypeCatalog.labels(applicationContext)
+
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row
         // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
-        // use the user's custom pages. A live workout prepends the configured workout page.
-        val layoutFlow = combine(configFlow, activePageFlow, workoutActiveFlow) { cfg, active, workoutActive ->
+        // use the user's custom pages. A live workout prepends the configured workout page; a live
+        // Strava segment or climb prepends its page and pins the display to it (segment wins).
+        val layoutFlow = combine(
+            configFlow, activePageFlow, workoutActiveFlow, segmentActiveFlow, climbActiveFlow,
+        ) { cfg, active, workoutActive, segmentActive, climbActive ->
             val cap = cellsForRows(cfg.rows)
             val base = if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
                 val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
@@ -143,7 +164,17 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             } else {
                 cfg.pages.asSequence().map { it.take(cap) }.filter { it.isNotEmpty() }.toList()
             }
-            if (workoutActive && cfg.workoutPage.isNotEmpty()) listOf(cfg.workoutPage.take(cap)) + base else base
+            val priority = mutableListOf<List<String>>()
+            var pinned: Int? = null
+            if (workoutActive && cfg.workoutPage.isNotEmpty()) priority.add(cfg.workoutPage.take(cap))
+            if (segmentActive && cfg.segmentPage.isNotEmpty()) {
+                pinned = priority.size
+                priority.add(cfg.segmentPage.take(cap))
+            } else if (climbActive && cfg.climbPage.isNotEmpty()) {
+                pinned = priority.size
+                priority.add(cfg.climbPage.take(cap))
+            }
+            Layout(priority + base, pinned)
         }.distinctUntilChanged()
 
         layoutFlow.flatMapLatest { layout ->
@@ -152,7 +183,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             // live POWER/CADENCE fields need their workout target streams to render
             // "value/target" mid-workout even when no target field is on a page. The target
             // streams are Idle outside a workout, so the extra subscriptions cost nothing.
-            val displayed = layout.asSequence().flatten().distinct().toList()
+            val displayed = layout.pages.asSequence().flatten().distinct().toList()
             val ids = buildList {
                 addAll(displayed)
                 if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
@@ -172,7 +203,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         val cfg = configFlow.value
                         val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
                         val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
-                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear))
+                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear, extLabels))
                     }
             }
             cellsFlow.map { cells -> layout to cells }
@@ -180,10 +211,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .sample(configFlow.value.refreshIntervalMs)
             .combine(rideStateFlow) { (layout, cells), ride ->
                 HudSnapshot(
-                    pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
+                    pages = layout.pages.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
+                    pinnedPage = layout.pinnedPage,
                     rows = configFlow.value.rows,
                     clock = if (configFlow.value.showClock) currentClock() else "",
                     showIcons = configFlow.value.showIcons,
@@ -193,6 +225,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
     }
+
+    /** A computed page layout: the pages to show plus an optional page to pin (segment/climb). */
+    private data class Layout(val pages: List<List<String>>, val pinnedPage: Int?)
 
     /** Current time of day as "HH:mm" from the Karoo's clock, for the HUD's top-left corner. */
     private fun currentClock(): String {
