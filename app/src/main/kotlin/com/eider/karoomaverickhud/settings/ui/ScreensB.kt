@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -184,12 +183,12 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 14.dp),
                             )
                         } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            KButton("", icon = "back", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur > 0,
-                                modifier = Modifier.width(52.dp)) {
+                            // Reorder this page within the numbered list. These move the page (and
+                            // follow it) — not prev/next navigation; use the numbered tabs above for that.
+                            KButton("Move ←", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur > 0) {
                                 if (cur > 0) { setPages(swap(pages, cur, cur - 1)); active = cur - 1 }
                             }
-                            KButton("", icon = "chevron", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur < pages.size - 1,
-                                modifier = Modifier.width(52.dp)) {
+                            KButton("Move →", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur < pages.size - 1) {
                                 if (cur < pages.size - 1) { setPages(swap(pages, cur, cur + 1)); active = cur + 1 }
                             }
                             KButton("Remove page", icon = "trash", variant = KBtnVariant.Danger, height = 44.dp, enabled = pages.size > 1,
