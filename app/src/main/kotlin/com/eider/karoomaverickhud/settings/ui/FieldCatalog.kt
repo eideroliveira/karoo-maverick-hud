@@ -204,6 +204,15 @@ val DRIVETRAINS: List<Drivetrain> = listOf(
 
 fun drivetrainById(id: String?): Drivetrain? = DRIVETRAINS.firstOrNull { it.id == id }
 
+/**
+ * The preset whose name we can show for the configured gearing — the one referenced by [id], but
+ * only while its chainrings/cassette still match [front]/[rear]. Once the rider hand-edits a ring
+ * or cassette away from the preset, this returns null so the label falls back to "Custom" instead
+ * of a stale name (e.g. still reading "RED AXS 48/35" after the front rings were changed).
+ */
+fun matchingDrivetrain(id: String?, front: List<Int>, rear: List<Int>): Drivetrain? =
+    drivetrainById(id)?.takeIf { it.front == front && it.rear == rear }
+
 /** A named cassette with its exact cog tooth array (smallest → largest). */
 data class Cassette(val id: String, val label: String, val cogs: List<Int>)
 

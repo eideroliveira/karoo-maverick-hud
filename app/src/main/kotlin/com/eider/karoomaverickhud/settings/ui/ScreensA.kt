@@ -77,7 +77,7 @@ fun HubScreen(
     onPreviewTap: () -> Unit = {},
 ) {
     val totalFields = cfg.pages.sumOf { it.size }
-    val dt = drivetrainById(cfg.gear.drivetrainId)
+    val dt = matchingDrivetrain(cfg.gear.drivetrainId, cfg.gear.front, cfg.gear.rear)
     val page = cfg.pages.getOrNull(previewPage.coerceIn(0, (cfg.pages.size - 1).coerceAtLeast(0))) ?: emptyList()
 
     ScreenScroll {
@@ -252,7 +252,7 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
 @Composable
 fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
     val gear = cfg.gear
-    val dt = drivetrainById(gear.drivetrainId)
+    val dt = matchingDrivetrain(gear.drivetrainId, gear.front, gear.rear)
     var scanning by remember { mutableStateOf(false) }
     var showPresets by remember { mutableStateOf(false) }
     var showCassettes by remember { mutableStateOf(false) }
