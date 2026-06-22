@@ -27,10 +27,16 @@ import timber.log.Timber
  */
 object GlassesLinkState {
     val connected = MutableStateFlow(value = false)
+    /** True while the SDK is mid-connect (paired but link not yet up) — shown as "Reconnecting…". */
+    val connecting = MutableStateFlow(value = false)
     /** Current display brightness 0..100, null when disconnected/unknown. */
     val brightness = MutableStateFlow<Int?>(value = null)
     /** True when the glasses' auto-brightness is enabled (overrides the manual level). */
     val autoBrightness = MutableStateFlow(value = false)
+    /** Glasses battery 0..100, null when disconnected/unknown — the ride-limiting resource. */
+    val battery = MutableStateFlow<Int?>(value = null)
+    /** BLE signal as 0..3 bars (RSSI-derived); 0 when disconnected or not yet read. */
+    val signal = MutableStateFlow(value = 0)
 }
 
 /**
@@ -285,6 +291,10 @@ class MaverickBridge(
                     } else {
                         null
                     }
+                    // Mirror battery + connecting for the Karoo data field (status tile).
+                    GlassesLinkState.battery.value = glassesBattery
+                    GlassesLinkState.connecting.value =
+                        !connected && runCatching { comm.isConnecting() }.getOrDefault(false)
                     // Brightness/auto mirror for the Karoo data field; cleared on disconnect.
                     if (connected) {
                         val b = runCatching { Evs.instance().display().getBrightness().toInt() }
@@ -300,12 +310,14 @@ class MaverickBridge(
                     } else {
                         GlassesLinkState.brightness.value = null
                         GlassesLinkState.autoBrightness.value = false
+                        GlassesLinkState.signal.value = 0
                     }
                     // Signal bars for the control window (BLE RSSI → 0..3).
                     if (connected) {
                         runCatching {
                             comm.requestRssiRead { rssi ->
                                 ctrlSignal = rssiToBars(rssi)
+                                GlassesLinkState.signal.value = ctrlSignal
                                 if (controlOpen) pushControl()
                             }
                         }
@@ -359,6 +371,45 @@ class MaverickBridge(
                     }
                 }
             }
+        }
+    }
+
+    /** Outcome of a data-field tap, so the extension knows whether it must open the pair UI. */
+    enum class TapResult { BRIGHTNESS, RECONNECTING, NEEDS_PAIR }
+
+    /**
+     * Single tap on the Karoo data field. Context-aware: cycle brightness while connected,
+     * otherwise kick an immediate reconnect — or report NEEDS_PAIR if nothing is paired yet so
+     * the extension can open the pair flow.
+     */
+    fun onFieldTap(): TapResult {
+        if (_connectionState.value) {
+            cycleBrightness()
+            return TapResult.BRIGHTNESS
+        }
+        if (configState.value.maverickDeviceId == null) return TapResult.NEEDS_PAIR
+        forceReconnect()
+        return TapResult.RECONNECTING
+    }
+
+    /**
+     * Re-assert the paired device and issue a secured connect, unless a link is already up or
+     * forming. The connection loop also auto-reconnects every couple of seconds; this is the
+     * rider's immediate "try now" so a drop doesn't feel like it's hanging.
+     */
+    private fun forceReconnect() {
+        scope.launch {
+            runCatching {
+                val comm = Evs.instance().comm()
+                if (comm.isConnected() || comm.isConnecting()) return@launch
+                val cfg = configState.value
+                val id = cfg.maverickDeviceId ?: return@launch
+                if (!comm.hasConfiguredDevice()) comm.setDeviceInfo(id, cfg.maverickDeviceName ?: "")
+                if (comm.hasConfiguredDevice()) {
+                    Timber.i("Manual reconnect from data-field tap")
+                    comm.connectSecured()
+                }
+            }.onFailure { Timber.w(it, "manual reconnect failed") }
         }
     }
 

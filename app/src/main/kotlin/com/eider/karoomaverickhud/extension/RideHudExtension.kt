@@ -44,14 +44,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var maverick: MaverickBridge
     private lateinit var rideStateFlow: StateFlow<RideState>
 
-    // In-ride field that shows Maverick connection status and current brightness. Reads the
+    // In-ride field that shows the Maverick at a glance (battery, signal, brightness). Reads the
     // process-wide GlassesLinkState, so it needs no reference to [maverick]; a tap broadcasts
-    // [ACTION_CYCLE_BRIGHTNESS] back to us.
+    // [ACTION_GLASSES_TAP] back to us.
     override val types by lazy { listOf(GlassesDataType(extension)) }
 
-    private val cycleBrightnessReceiver = object : BroadcastReceiver() {
+    private val glassesTapReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (::maverick.isInitialized) maverick.cycleBrightness()
+            if (!::maverick.isInitialized) return
+            // Context-aware: brightness when connected, reconnect when down, pair when never paired.
+            if (maverick.onFieldTap() == MaverickBridge.TapResult.NEEDS_PAIR) openPairFlow()
         }
     }
 
@@ -73,8 +75,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         ContextCompat.registerReceiver(
             this,
-            cycleBrightnessReceiver,
-            IntentFilter(ACTION_CYCLE_BRIGHTNESS),
+            glassesTapReceiver,
+            IntentFilter(ACTION_GLASSES_TAP),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
 
@@ -89,17 +91,20 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
      */
     override fun onBonusAction(actionId: String) {
         Timber.i("onBonusAction $actionId")
-        if (actionId == "pair") {
-            val intent = Intent(this, SettingsActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
-            startActivity(intent)
-        }
+        if (actionId == "pair") openPairFlow()
+    }
+
+    /** Open the app straight into the pair flow (GPS is on mid-ride, which the BLE scan needs). */
+    private fun openPairFlow() {
+        val intent = Intent(this, SettingsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
+        startActivity(intent)
     }
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
-        runCatching { unregisterReceiver(cycleBrightnessReceiver) }
+        runCatching { unregisterReceiver(glassesTapReceiver) }
         scope.cancel()
         maverick.shutdown()
         karoo.disconnect()
@@ -107,8 +112,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     companion object {
-        /** Broadcast sent by a tap on the Karoo data field to cycle glasses brightness. */
-        const val ACTION_CYCLE_BRIGHTNESS = "com.eider.karoomaverickhud.CYCLE_BRIGHTNESS"
+        /** Broadcast sent by a tap on the Karoo data field — cycles brightness when connected, else reconnects/pairs. */
+        const val ACTION_GLASSES_TAP = "com.eider.karoomaverickhud.GLASSES_TAP"
     }
 
     /**
