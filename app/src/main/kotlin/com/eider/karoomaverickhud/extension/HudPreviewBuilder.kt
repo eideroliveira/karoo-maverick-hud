@@ -22,7 +22,13 @@ object HudPreviewBuilder {
         val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
         val cap = cellsForRows(cfg.rows)
         val pages = cfg.pages.map { page ->
-            page.take(cap).map { id -> FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, null, gear) }
+            val ids = page.take(cap)
+            // Mirror the runtime overlay: a page that carries a workout-target field gets a context
+            // pre-stashed with the demo targets, so its live POWER/CADENCE tiles preview the same
+            // "current/target" composite (with range colouring) the rider sees mid-workout. Pages
+            // without a target field keep a null context and preview as plain zone-coloured values.
+            val ctx = workoutPreviewCtx(ids, cfg, zones, gear, seed)
+            ids.map { id -> FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear) }
         }.filter { it.isNotEmpty() }
         val idx = if (pages.isEmpty()) 0 else pageIndex % pages.size
         return HudSnapshot(
@@ -34,6 +40,23 @@ object HudPreviewBuilder {
             clock = "", // stamped by the bridge if the clock is enabled
             showIcons = cfg.showIcons,
         )
+    }
+
+    /**
+     * A [FormatContext] pre-stashed with the demo workout targets when [ids] contains a workout
+     * target field, else null. Formatting a target field stashes its target into the context (the
+     * same side effect the runtime pipeline relies on for the live POWER/CADENCE overlay); doing it
+     * up front means the order of fields on the page doesn't matter — POWER/CADENCE pick up the
+     * stashed target regardless of where they sit.
+     */
+    private fun workoutPreviewCtx(ids: List<String>, cfg: HudConfig, zones: ZoneConfig, gear: GearLayout, seed: Int): FormatContext? {
+        val targetIds = ids.filter {
+            it == DataType.Type.WORKOUT_POWER_TARGET || it == DataType.Type.WORKOUT_CADENCE_TARGET
+        }
+        if (targetIds.isEmpty()) return null
+        val ctx = FormatContext()
+        targetIds.forEach { id -> FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear) }
+        return ctx
     }
 
     /** A fabricated [StreamState] carrying a plausible demo value for [dataTypeId]. */
