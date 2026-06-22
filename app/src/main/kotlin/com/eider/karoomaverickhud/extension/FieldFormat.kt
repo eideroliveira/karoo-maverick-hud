@@ -28,6 +28,26 @@ fun cellsForRows(rows: Int): Int = COLUMNS * rows.coerceIn(MIN_ROWS, MAX_ROWS)
 enum class HudColor { WHITE, GREEN, YELLOW, ORANGE, RED, PURPLE, CYAN }
 
 /**
+ * Low-battery warning tiers for the glasses. As the glasses battery drains we slow the HUD refresh
+ * (to cut the BLE/redraw load that drains it faster) and surface the percentage in a warning colour
+ * at the top of the screen. Entries are ordered most-severe first so [forLevel] can take the first
+ * match; [pollMs] is the HUD refresh interval to use while the tier is active.
+ */
+enum class BatteryWarn(val maxPct: Int, val pollMs: Long, val color: HudColor) {
+    CRITICAL(maxPct = 10, pollMs = 5_000L, color = HudColor.RED),
+    LOW(maxPct = 20, pollMs = 3_000L, color = HudColor.ORANGE),
+    WARN(maxPct = 30, pollMs = 2_000L, color = HudColor.YELLOW);
+
+    companion object {
+        /** Severest tier whose threshold the battery is at or below; null when healthy or unknown. */
+        fun forLevel(batteryPct: Int?): BatteryWarn? {
+            if (batteryPct == null) return null
+            return entries.firstOrNull { batteryPct <= it.maxPct }
+        }
+    }
+}
+
+/**
  * One editable training-zone band, as a percentage window of a base value (FTP or MaxHR).
  * [lo]/[hi] are inclusive-low, exclusive-high percentages; [name]/[sub] are display-only.
  * Serializable so it round-trips through [com.eider.karoomaverickhud.settings.HudPreferences].
