@@ -35,7 +35,6 @@ class HudScreen : Screen(420f, 150f) {
     private val leftX = 8f
     private val rightX = screenW - 8f
     private val iconW = 26f
-    private val iconGap = 4f
 
     // Centre control-window geometry (a bordered box with time/signal/battery + a brightness slider).
     private val boxX = 50f
@@ -346,7 +345,7 @@ class HudScreen : Screen(420f, 150f) {
         }
     }
 
-    /** Render one cell: value on top, unit/label (+ optional icon) below, tinted by the zone colour. */
+    /** Render one cell: value on top, then either the unit/label text or — when icons are on — its icon. */
     private fun layoutCell(i: Int, slot: Slot, cell: HudCell?, showIcons: Boolean) {
         val color = colorRgba(cell?.color ?: HudColor.WHITE)
         val align = if (slot.isRight) Align.right else Align.left
@@ -355,14 +354,15 @@ class HudScreen : Screen(420f, 150f) {
         values[i].setText(cell?.value ?: "").setForegroundColor(color)
         values[i].setTextAlign(align).setXY(anchorX, slot.valueY)
 
-        // The colored value carries the zone signal; the unit/label stays white so it recedes
-        // behind the value (a second hierarchy cue beyond size) and only the value's hue competes
-        // for the eye — fewer colored elements per page reads cleaner on the see-through LCOS.
-        val labelText = cell?.units.orEmpty()
+        // With icons on, the icon stands in for the label entirely; cells without an icon still
+        // fall back to the text so the field never goes unlabeled. The colored value carries the
+        // zone signal; the label/icon stays white so it recedes behind the value (a second
+        // hierarchy cue beyond size) — fewer colored elements per page reads cleaner on the LCOS.
+        val icon = cell?.icon
+        val labelText = if (showIcons && icon != null) "" else cell?.units.orEmpty()
         units[i].setText(labelText).setForegroundColor(LABEL_RGBA)
         units[i].setTextAlign(align).setXY(anchorX, slot.labelY)
 
-        val icon = cell?.icon
         if (!showIcons || icon == null) {
             icons[i].setVisibility(false)
             currentIcon[i] = null
@@ -371,10 +371,8 @@ class HudScreen : Screen(420f, 150f) {
                 icons[i].setResource(imgSrcFor(icon))
                 currentIcon[i] = icon
             }
-            // Icon sits on the inner side of the label: after it on the left, before it on the right.
-            val labelW = if (labelText.isEmpty()) 0f else units[i].getMeasuredContentWidth()
-            val iconX = if (slot.isRight) (rightX - labelW) - iconGap - iconW else leftX + labelW + iconGap
-            // Icon is part of the label, not the signal — keep it white alongside the unit text.
+            // Icon takes the label's place, so anchor it exactly where the label would have sat.
+            val iconX = if (slot.isRight) rightX - iconW else leftX
             icons[i].setForegroundColor(LABEL_RGBA).setXY(iconX, slot.iconY).setVisibility(true)
         }
     }
