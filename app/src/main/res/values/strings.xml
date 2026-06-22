@@ -18,4 +18,7 @@
     <string name="field_status_connected">Connected</string>
     <string name="field_status_disconnected">Disconnected\nTap to pair</string>
     <string name="pair_action">Pair glasses</string>
+    <string name="configure_action">Configure HUD</string>
+    <string name="glasses_battery_field">Maverick Battery</string>
+    <string name="glasses_battery_desc">Everysight Maverick glasses battery level</string>
 </resources>

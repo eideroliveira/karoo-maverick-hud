@@ -12,8 +12,11 @@ import com.eider.karoomaverickhud.settings.PageMode
 import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
+import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.ActiveRidePage
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.Device
+import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
 import java.util.Calendar
@@ -42,6 +45,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var karoo: KarooSystemService
     private lateinit var maverick: MaverickBridge
+    private lateinit var deviceProvider: MaverickDeviceProvider
     private lateinit var rideStateFlow: StateFlow<RideState>
 
     // In-ride field that shows Maverick connection status and current brightness. Reads the
@@ -61,6 +65,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         karoo = KarooSystemService(applicationContext)
         maverick = MaverickBridge(applicationContext, scope)
+        deviceProvider = MaverickDeviceProvider(applicationContext, scope, maverick, extension)
 
         karoo.connect { connected ->
             Timber.i("Karoo system connected=$connected")
@@ -69,7 +74,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         rideStateFlow = karoo.consumerFlow<RideState>()
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
-        maverick.start()
+        // The bridge gates the glasses link on ride state — held while recording/paused, released
+        // when idle — so it needs the same ride-state feed the pipeline uses.
+        maverick.start(rideStateFlow)
 
         ContextCompat.registerReceiver(
             this,
@@ -83,19 +90,37 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     /**
-     * Ride-menu actions. "pair" opens the app straight into the pair flow — a reliable
-     * in-ride trigger (GPS is on during a ride, which the BLE scan needs) that, unlike a
-     * data-field tap, the Karoo guarantees to deliver.
+     * Ride-menu actions, both reliable in-ride triggers the Karoo guarantees to deliver (unlike a
+     * data-field tap):
+     *  - "pair" opens the app straight into the pair flow (GPS is on during a ride, which the BLE
+     *    scan needs).
+     *  - "configure" opens the settings app — the easy way into configuration without leaving the
+     *    ride screen for the Extensions menu.
      */
     override fun onBonusAction(actionId: String) {
         Timber.i("onBonusAction $actionId")
-        if (actionId == "pair") {
-            val intent = Intent(this, SettingsActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
-            startActivity(intent)
+        when (actionId) {
+            "pair" -> openSettings(autoPair = true)
+            "configure" -> openSettings(autoPair = false)
         }
     }
+
+    private fun openSettings(autoPair: Boolean) {
+        val intent = Intent(this, SettingsActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (autoPair) intent.putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
+        startActivity(intent)
+    }
+
+    /**
+     * Device-provider hooks (enabled by `scansDevices="true"`): let the rider pair and monitor the
+     * glasses from the native Karoo Sensors UI. Delegated to [MaverickDeviceProvider]; the link
+     * stays owned by [MaverickBridge].
+     */
+    override fun startScan(emitter: Emitter<Device>) = deviceProvider.startScan(emitter)
+
+    override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) =
+        deviceProvider.connectDevice(uid, emitter)
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
@@ -146,38 +171,43 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             if (workoutActive && cfg.workoutPage.isNotEmpty()) listOf(cfg.workoutPage.take(cap)) + base else base
         }.distinctUntilChanged()
 
-        layoutFlow.flatMapLatest { layout ->
-            // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
-            // CADENCE colouring needs the live power reading for its under-gear rule, and the
-            // live POWER/CADENCE fields need their workout target streams to render
-            // "value/target" mid-workout even when no target field is on a page. The target
-            // streams are Idle outside a workout, so the extra subscriptions cost nothing.
-            val displayed = layout.asSequence().flatten().distinct().toList()
-            val ids = buildList {
-                addAll(displayed)
-                if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
-                if (DataType.Type.POWER in displayed && DataType.Type.WORKOUT_POWER_TARGET !in displayed) add(DataType.Type.WORKOUT_POWER_TARGET)
-                if (DataType.Type.CADENCE in displayed && DataType.Type.WORKOUT_CADENCE_TARGET !in displayed) add(DataType.Type.WORKOUT_CADENCE_TARGET)
-            }
-            val cellsFlow = if (ids.isEmpty()) {
-                flowOf(emptyMap())
-            } else {
-                // One context per layout subscription — carries the last power reading and the
-                // under-gear dwell timer that the cadence colour rule needs. Re-created on every
-                // layout change so a page swap doesn't leak a stale timer.
-                val ctx = FormatContext()
-                val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
-                merge(*streams.toTypedArray())
-                    .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
-                        val cfg = configFlow.value
-                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
-                        val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
-                        acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear))
-                    }
-            }
-            cellsFlow.map { cells -> layout to cells }
+        // Re-evaluated when the (configurable) refresh interval changes so the setting actually
+        // takes effect — previously it was read once at flow assembly and pinned for the session.
+        val refreshMsFlow = configFlow.map { it.refreshIntervalMs }.distinctUntilChanged()
+
+        refreshMsFlow.flatMapLatest { refreshMs ->
+            layoutFlow.flatMapLatest { layout ->
+                // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
+                // CADENCE colouring needs the live power reading for its under-gear rule, and the
+                // live POWER/CADENCE fields need their workout target streams to render
+                // "value/target" mid-workout even when no target field is on a page. The target
+                // streams are Idle outside a workout, so the extra subscriptions cost nothing.
+                val displayed = layout.asSequence().flatten().distinct().toList()
+                val ids = buildList {
+                    addAll(displayed)
+                    if (DataType.Type.CADENCE in displayed && DataType.Type.POWER !in displayed) add(DataType.Type.POWER)
+                    if (DataType.Type.POWER in displayed && DataType.Type.WORKOUT_POWER_TARGET !in displayed) add(DataType.Type.WORKOUT_POWER_TARGET)
+                    if (DataType.Type.CADENCE in displayed && DataType.Type.WORKOUT_CADENCE_TARGET !in displayed) add(DataType.Type.WORKOUT_CADENCE_TARGET)
+                }
+                val cellsFlow = if (ids.isEmpty()) {
+                    flowOf(emptyMap())
+                } else {
+                    // One context per layout subscription — carries the last power reading and the
+                    // under-gear dwell timer that the cadence colour rule needs. Re-created on every
+                    // layout change so a page swap doesn't leak a stale timer.
+                    val ctx = FormatContext()
+                    val streams = ids.map { id -> karoo.streamDataFlow(id).map { state -> id to state } }
+                    merge(*streams.toTypedArray())
+                        .scan(emptyMap<String, HudCell>()) { acc, (id, state) ->
+                            val cfg = configFlow.value
+                            val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
+                            val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
+                            acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear))
+                        }
+                }
+                cellsFlow.map { cells -> layout to cells }
+            }.sample(refreshMs)
         }
-            .sample(configFlow.value.refreshIntervalMs)
             .combine(rideStateFlow) { (layout, cells), ride ->
                 HudSnapshot(
                     pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },

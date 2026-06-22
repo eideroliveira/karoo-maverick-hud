@@ -7,6 +7,7 @@ import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.PageMode
 import com.everysight.evskit.android.Evs
+import io.hammerhead.karooext.models.RideState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,6 +32,9 @@ object GlassesLinkState {
     val brightness = MutableStateFlow<Int?>(value = null)
     /** True when the glasses' auto-brightness is enabled (overrides the manual level). */
     val autoBrightness = MutableStateFlow(value = false)
+    /** Latest glasses battery %, null when disconnected/unknown. Mirrored for the Karoo sensor
+     *  report (see [com.eider.karoomaverickhud.extension.MaverickDeviceProvider]). */
+    val battery = MutableStateFlow<Int?>(value = null)
 }
 
 /**
@@ -83,6 +87,19 @@ class MaverickBridge(
 
     // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
     @Volatile private var glassesBattery: Int? = null
+    // Wall-clock of the last over-the-air battery read, so we can refresh it on a slow cadence
+    // (battery moves ~1%/min) instead of every liveness tick.
+    private var lastBatteryReadAt = 0L
+
+    // Ride state, supplied by the extension via [start]. We don't gate the link on it; it only
+    // re-arms the connect window when a ride starts (so a give-up earlier in the day still
+    // reconnects for the ride).
+    private var rideState: StateFlow<RideState>? = null
+
+    // Wall-clock deadline for connect attempts. We keep retrying a paired-but-absent device only
+    // until this passes, then give up (stop hammering the BLE radio) until something re-arms it —
+    // a fresh process start, a drop after a successful connect, a ride starting, or a live preview.
+    @Volatile private var retryUntil = 0L
 
     // Centre control-window state (toggled by long-tap). Brightness 0..100, signal 0..3 bars.
     @Volatile private var controlOpen = false
@@ -93,15 +110,50 @@ class MaverickBridge(
     private var connectionJob: Job? = null
 
     /**
-     * Start the extension's glasses work: auto-connect to the paired Maverick and hold the
-     * link (reconnecting on drops), plus page cycling. The HUD itself shows whether a ride
-     * is active; the link is no longer ride-gated. Released in [shutdown].
+     * Start the extension's glasses work: connect to the paired Maverick and then stay connected,
+     * reconnecting on drops. Connect attempts are bounded by [retryUntil] so an absent device isn't
+     * hammered forever; the window re-arms on a ride start (see [startRetryArmer]). Released in
+     * [shutdown].
      */
-    fun start() {
+    fun start(rideState: StateFlow<RideState>) {
+        this.rideState = rideState
+        armRetry() // try to connect for the first window from process start
         hudScreen.onTouchPad = ::handleTouch
         startConnectionLoop()
+        startRetryArmer()
         startPageCycler()
         startPreviewObserver()
+    }
+
+    /** Open a fresh connect-retry window. */
+    private fun armRetry() {
+        retryUntil = System.currentTimeMillis() + CONNECT_WINDOW_MS
+    }
+
+    /**
+     * Re-arm the connect window now. Called when the rider pairs the glasses through the native
+     * Karoo Sensors flow — the paired id is written to prefs (which the loop reads), and this makes
+     * the loop attempt the connect immediately rather than waiting for a ride or giving up.
+     */
+    fun requestConnect() = armRetry()
+
+    /**
+     * Re-arm the connect window when a ride starts. If the glasses were absent at app launch and we
+     * gave up, beginning a ride is the moment we most want them back — so try again for a window.
+     */
+    private fun startRetryArmer() {
+        val rs = rideState ?: return
+        scope.launch {
+            var wasIdle = rs.value is RideState.Idle
+            rs.collect { state ->
+                val idle = state is RideState.Idle
+                if (wasIdle && !idle && !_connectionState.value) {
+                    Timber.i("Ride started while disconnected — re-arming Maverick connect window")
+                    armRetry()
+                }
+                wasIdle = idle
+            }
+        }
     }
 
     fun update(snapshot: HudSnapshot) {
@@ -112,7 +164,10 @@ class MaverickBridge(
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
         val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
         lastRideSnapshot = stamped
-        publish(stamped)
+        // Skip redundant pushes: when idle/paused or the sensors are steady, the pipeline keeps
+        // ticking out identical frames that would otherwise re-flush the glasses every interval.
+        // Equality is structural (HudSnapshot/HudCell are data classes).
+        if (stamped != lastSnapshot) publish(stamped)
         mountScreenIfNeeded()
     }
 
@@ -264,55 +319,86 @@ class MaverickBridge(
     }
 
     /**
-     * Keep the paired glasses connected. Polls the SDK link state, mirrors it for the UI,
-     * and re-issues a secured connect whenever the device is paired but not connected (and
-     * not already connecting). Runs for the extension's whole lifetime.
+     * Connect to the paired glasses and keep them connected, mirroring link state for the UI. The
+     * link is *not* ride-gated: once up it stays up (reconnecting on drops). What's bounded is the
+     * *attempting* — we only fire connects while inside the [retryUntil] window, so a paired device
+     * that's simply absent (left at home, powered off) isn't hammered forever. A successful connect,
+     * a subsequent drop, a live preview, or a ride start all re-open the window.
+     *
+     * Battery care kept from the earlier pass: the over-the-air reads (brightness, auto, RSSI) run
+     * only when something shows them (control window open, or just-connected seeding), and battery %
+     * refreshes on a slow cadence ([BATTERY_INTERVAL_MS]). Base cadence scales with need.
      */
     private fun startConnectionLoop() {
         connectionJob = scope.launch {
             while (isActive) {
+                var nextDelay = IDLE_INTERVAL_MS
                 runCatching {
                     val comm = Evs.instance().comm()
+                    val wasConnected = _connectionState.value
                     val connected = comm.isConnected()
-                    if (connected != _connectionState.value) {
+                    val justConnected = connected && !wasConnected
+                    val justDropped = !connected && wasConnected
+                    if (connected != wasConnected) {
                         _connectionState.value = connected
                         GlassesLinkState.connected.value = connected
                         if (!connected) screenMounted = false
                     }
-                    // Glasses battery for the HUD's top-right corner; stamped onto snapshots in update().
-                    glassesBattery = if (connected) {
-                        runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in (0..100) }
-                    } else {
-                        null
-                    }
-                    // Brightness/auto mirror for the Karoo data field; cleared on disconnect.
+                    // A drop after a good connection is a transient (out of range, glasses slept) —
+                    // re-arm so we actively work to get back, rather than honouring a window that may
+                    // already have expired during a long ride.
+                    if (justDropped) armRetry()
+
                     if (connected) {
-                        val b = runCatching { Evs.instance().display().getBrightness().toInt() }
-                            .getOrNull()?.takeIf { it in 0..100 }
-                        val a = runCatching { Evs.instance().display().autoBrightness().isEnabled() }
-                            .getOrDefault(false)
-                        if (b != null) {
-                            ctrlBrightness = b
-                            GlassesLinkState.brightness.value = b
+                        // Battery for the HUD corner: refresh on a slow cadence, plus once on connect.
+                        val now = System.currentTimeMillis()
+                        if (justConnected || now - lastBatteryReadAt >= BATTERY_INTERVAL_MS) {
+                            glassesBattery = runCatching { Evs.instance().glasses().batteryPercentage() }
+                                .getOrNull()?.takeIf { it in 0..100 }
+                            GlassesLinkState.battery.value = glassesBattery
+                            lastBatteryReadAt = now
                         }
-                        ctrlAuto = a
-                        GlassesLinkState.autoBrightness.value = a
+                        // Brightness/auto mirror for the Karoo data field. Only the user changes
+                        // these (via the control window / data-field tap, which write the mirror
+                        // directly), so we just seed once on connect and re-read while the control
+                        // window is open — no need to poll the glasses for them every tick.
+                        if (justConnected || controlOpen) {
+                            val b = runCatching { Evs.instance().display().getBrightness().toInt() }
+                                .getOrNull()?.takeIf { it in 0..100 }
+                            val a = runCatching { Evs.instance().display().autoBrightness().isEnabled() }
+                                .getOrDefault(false)
+                            if (b != null) {
+                                ctrlBrightness = b
+                                GlassesLinkState.brightness.value = b
+                            }
+                            ctrlAuto = a
+                            GlassesLinkState.autoBrightness.value = a
+                        }
+                        // Signal bars are only drawn inside the control window — read RSSI solely
+                        // while it's open.
+                        if (controlOpen) {
+                            runCatching {
+                                comm.requestRssiRead { rssi ->
+                                    ctrlSignal = rssiToBars(rssi)
+                                    if (controlOpen) pushControl()
+                                }
+                            }
+                        }
                     } else {
+                        glassesBattery = null
+                        GlassesLinkState.battery.value = null
                         GlassesLinkState.brightness.value = null
                         GlassesLinkState.autoBrightness.value = false
                     }
-                    // Signal bars for the control window (BLE RSSI → 0..3).
-                    if (connected) {
-                        runCatching {
-                            comm.requestRssiRead { rssi ->
-                                ctrlSignal = rssiToBars(rssi)
-                                if (controlOpen) pushControl()
-                            }
-                        }
-                    }
+
+                    // A live preview wants the link regardless of the retry window (the rider is in
+                    // settings expecting to see the glasses); otherwise only attempt while armed.
+                    val previewing = HudState.previewSnapshot.value != null
+                    val mayAttempt = previewing || System.currentTimeMillis() < retryUntil
+
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
-                    if ((pairedId != null) && !connected && !comm.isConnecting()) {
+                    if (mayAttempt && pairedId != null && !connected && !comm.isConnecting()) {
                         // The SDK can lose its configured device across process restarts; restore
                         // it from our prefs so a ride reliably reconnects instead of sitting idle.
                         if (!comm.hasConfiguredDevice()) {
@@ -325,8 +411,15 @@ class MaverickBridge(
                             comm.connectSecured()
                         }
                     }
+
+                    nextDelay = when {
+                        controlOpen -> CONTROL_INTERVAL_MS       // responsive brightness/signal
+                        connected -> CONNECTED_INTERVAL_MS       // hold the link, catch drops
+                        mayAttempt -> CONNECT_RETRY_INTERVAL_MS  // actively trying to connect
+                        else -> IDLE_INTERVAL_MS                 // gave up; just tick over cheaply
+                    }
                 }.onFailure { Timber.w(it, "connection loop error") }
-                delay(POLL_INTERVAL_MS)
+                delay(nextDelay)
             }
         }
     }
@@ -363,6 +456,17 @@ class MaverickBridge(
     }
 
     companion object {
-        private const val POLL_INTERVAL_MS = 2_000L
+        /** How long to keep attempting a connect before giving up on an absent device. */
+        private const val CONNECT_WINDOW_MS = 3 * 60_000L
+        /** Snappy cadence while the control window is open (live brightness/signal feedback). */
+        private const val CONTROL_INTERVAL_MS = 1_000L
+        /** Connected: hold the link and notice a drop reasonably quickly. */
+        private const val CONNECTED_INTERVAL_MS = 4_000L
+        /** Disconnected but still armed: retry briskly so the link comes up fast. */
+        private const val CONNECT_RETRY_INTERVAL_MS = 2_000L
+        /** Gave up (window elapsed, device absent): just keep the loop alive cheaply. */
+        private const val IDLE_INTERVAL_MS = 10_000L
+        /** How often to refresh the glasses battery % over the air; it moves ~1%/min. */
+        private const val BATTERY_INTERVAL_MS = 60_000L
     }
 }
