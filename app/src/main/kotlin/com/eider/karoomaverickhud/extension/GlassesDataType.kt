@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.widget.RemoteViews
 import com.eider.karoomaverickhud.R
+import com.eider.karoomaverickhud.maverick.Eco
 import com.eider.karoomaverickhud.maverick.GlassesLinkState
 import io.hammerhead.karooext.extension.DataTypeImpl
 import io.hammerhead.karooext.internal.ViewEmitter
@@ -18,23 +19,26 @@ import timber.log.Timber
 
 /**
  * A ride data field that surfaces the Maverick link at a glance — glasses battery (the real
- * ride-limiting resource), BLE signal, and the current display brightness — and doubles as a
- * one-tap control. Karoo data fields are RemoteViews (single click only, no long-press), so the
- * tap is context-aware: connected → cycle brightness 50→75→100→auto; disconnected → force a
- * reconnect, or open pairing if no glasses are paired yet (handled in [RideHudExtension]).
+ * ride-limiting resource), BLE signal, and the current display brightness or ECO badge — and
+ * doubles as a one-tap control. Karoo data fields are RemoteViews (single click only, no
+ * long-press), so the tap is context-aware: connected → toggle battery-saver (brightness now lives
+ * on the temple pad / settings); disconnected → force a reconnect, or open pairing if no glasses
+ * are paired yet (handled in [RideHudExtension]).
  */
 class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
 
     override fun startView(context: Context, config: ViewConfig, emitter: ViewEmitter) {
         val job = CoroutineScope(Dispatchers.IO).launch {
             combine(
-                combine(GlassesLinkState.connected, GlassesLinkState.connecting) { c, ing -> c to ing },
+                combine(
+                    GlassesLinkState.connected, GlassesLinkState.connecting, Eco.active, Eco.auto,
+                ) { c, ing, eco, ecoAuto -> Link(c, ing, eco, ecoAuto) },
                 GlassesLinkState.battery,
                 GlassesLinkState.signal,
                 GlassesLinkState.brightness,
                 GlassesLinkState.autoBrightness,
-            ) { (connected, connecting), battery, signal, brightness, auto ->
-                State(connected, connecting, battery, signal, brightness, auto)
+            ) { link, battery, signal, brightness, auto ->
+                State(link.connected, link.connecting, battery, signal, brightness, auto, link.eco, link.ecoAuto)
             }.collect { state ->
                 val views = RemoteViews(context.packageName, R.layout.view_glasses_field)
                 render(views, if (config.preview) PREVIEW else state)
@@ -50,6 +54,13 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
         }
     }
 
+    private data class Link(
+        val connected: Boolean,
+        val connecting: Boolean,
+        val eco: Boolean,
+        val ecoAuto: Boolean,
+    )
+
     private data class State(
         val connected: Boolean,
         val connecting: Boolean,
@@ -57,6 +68,8 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
         val signal: Int,
         val brightness: Int?,
         val auto: Boolean,
+        val eco: Boolean,
+        val ecoAuto: Boolean,
     )
 
     private fun render(views: RemoteViews, s: State) {
@@ -67,15 +80,17 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
             views.setTextColor(R.id.gf_main, COLOR_WHITE)
             return
         }
-        // Top line: brightness + signal bars (link quality). Brightness is what the tap cycles.
-        val bright = when {
+        // Top line: an ECO badge while battery-saver is engaged (amber, "(auto)" when the low-battery
+        // threshold tripped it), otherwise the current brightness. Signal bars (link quality) follow.
+        val lead = when {
+            s.eco -> if (s.ecoAuto) "ECO (auto)" else "ECO"
             s.auto -> "Auto"
             s.brightness != null -> "${s.brightness}%"
             else -> "—"
         }
         val bars = signalBars(s.signal)
-        views.setTextViewText(R.id.gf_top, if (bars.isEmpty()) bright else "$bright  $bars")
-        views.setTextColor(R.id.gf_top, COLOR_DIM)
+        views.setTextViewText(R.id.gf_top, if (bars.isEmpty()) lead else "$lead  $bars")
+        views.setTextColor(R.id.gf_top, if (s.eco) COLOR_AMBER else COLOR_DIM)
         // Main line: glasses battery — the hero value, coloured by how worried you should be.
         views.setTextViewText(R.id.gf_main, s.battery?.let { "$it%" } ?: "—")
         views.setTextColor(R.id.gf_main, batteryColor(s.battery))
@@ -121,6 +136,8 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
             signal = 2,
             brightness = 75,
             auto = false,
+            eco = false,
+            ecoAuto = false,
         )
     }
 }

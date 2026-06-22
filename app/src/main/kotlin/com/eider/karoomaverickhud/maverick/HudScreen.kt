@@ -108,6 +108,7 @@ class HudScreen : Screen(420f, 150f) {
     private val clockText = Text() // time of day (shown inside the control window)
     private val batteryText = Text() // glasses battery % (shown inside the control window)
     private val batteryWarnText = Text() // low-battery % overlaid top-centre, tinted by BatteryWarn tier
+    private val ecoText = Text() // "ECO" badge, top-left, while battery-saver is engaged
 
     // One ImgSrc per glyph (each gets its own glasses image slot). Drawn only when the rider
     // enables HUD icons (HudSnapshot.showIcons).
@@ -194,6 +195,17 @@ class HudScreen : Screen(420f, 150f) {
             .setTextAlign(Align.center)
             .setXY(getWidth() / 2f, 4f)
             .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+
+        // ECO badge: top-left corner, lit amber while battery-saver is engaged; clear of the
+        // centred pause/battery markers. Hidden until a saver-stamped snapshot arrives.
+        ecoText
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(leftX, 4f)
+            .setForegroundColor(EvsColor.Yellow.rgba)
             .setVisibility(false)
             .addTo(this)
 
@@ -289,8 +301,13 @@ class HudScreen : Screen(420f, 150f) {
             for (i in 0 until cellCount) blankCell(i)
             statusText.setText("")
             pauseDot.setText("")
+            ecoText.setVisibility(false)
             return
         }
+
+        // ECO badge (top-left) whenever battery-saver is engaged — shown over both the waiting
+        // screen and the live HUD below.
+        ecoText.setText(if (snap.eco) "ECO" else "").setVisibility(snap.eco)
 
         // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
         if (!snap.recording && !snap.paused) {

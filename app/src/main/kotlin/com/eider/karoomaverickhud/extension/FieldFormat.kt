@@ -285,6 +285,8 @@ data class HudSnapshot(
     val battery: Int? = null,
     /** Whether to draw each cell's icon next to its unit/label. */
     val showIcons: Boolean = false,
+    /** Whether battery-saver ("ECO") is engaged — drives the top-left ECO badge on the glasses. */
+    val eco: Boolean = false,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
