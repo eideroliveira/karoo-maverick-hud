@@ -146,7 +146,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             if (workoutActive && cfg.workoutPage.isNotEmpty()) listOf(cfg.workoutPage.take(cap)) + base else base
         }.distinctUntilChanged()
 
-        layoutFlow.flatMapLatest { layout ->
+        val cellsPipeline = layoutFlow.flatMapLatest { layout ->
             // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
             // CADENCE colouring needs the live power reading for its under-gear rule, and the
             // live POWER/CADENCE fields need their workout target streams to render
@@ -177,7 +177,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             }
             cellsFlow.map { cells -> layout to cells }
         }
-            .sample(configFlow.value.refreshIntervalMs)
+
+        // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
+        // low-battery tiers (BatteryWarn) cut the BLE/redraw load that drains it faster. A change
+        // re-subscribes the streams (same as a layout swap), so it only churns on a config change
+        // or a battery threshold crossing — both rare.
+        val refreshFlow = combine(configFlow, maverick.glassesBattery) { cfg, battery ->
+            BatteryWarn.forLevel(battery)?.pollMs ?: cfg.refreshIntervalMs
+        }.distinctUntilChanged()
+
+        refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) }
             .combine(rideStateFlow) { (layout, cells), ride ->
                 HudSnapshot(
                     pages = layout.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },

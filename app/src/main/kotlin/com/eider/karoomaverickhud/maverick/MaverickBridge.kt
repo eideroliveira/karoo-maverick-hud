@@ -2,6 +2,7 @@ package com.eider.karoomaverickhud.maverick
 
 import UIKit.app.data.TouchDirection
 import android.content.Context
+import android.os.SystemClock
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.HudPreferences
@@ -81,8 +82,10 @@ class MaverickBridge(
     // paused and no sensors are emitting).
     @Volatile private var lastRideSnapshot: HudSnapshot? = null
 
-    // Latest glasses battery %, refreshed by the connection loop; null when disconnected.
-    @Volatile private var glassesBattery: Int? = null
+    // Latest glasses battery %, refreshed by the connection loop; null when disconnected. Exposed as
+    // a flow so the ride pipeline can slow its refresh as the battery drains (see BatteryWarn).
+    private val _glassesBattery = MutableStateFlow<Int?>(value = null)
+    val glassesBattery: StateFlow<Int?> = _glassesBattery.asStateFlow()
 
     // Centre control-window state (toggled by long-tap). Brightness 0..100, signal 0..3 bars.
     @Volatile private var controlOpen = false
@@ -110,7 +113,7 @@ class MaverickBridge(
         if (HudState.previewSnapshot.value != null) return
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        val stamped = snapshot.copy(pageIndex = pageIndex, battery = glassesBattery)
+        val stamped = snapshot.copy(pageIndex = pageIndex, battery = _glassesBattery.value)
         lastRideSnapshot = stamped
         publish(stamped)
         mountScreenIfNeeded()
@@ -121,14 +124,14 @@ class MaverickBridge(
         scope.launch {
             HudState.previewSnapshot.collect { preview ->
                 if (preview != null) {
-                    publish(preview.copy(battery = glassesBattery))
+                    publish(preview.copy(battery = _glassesBattery.value))
                     mountScreenIfNeeded()
                 } else {
                     // Preview cleared (settings backgrounded/closed): restore the last ride frame
                     // immediately so the glasses snap back to realtime instead of holding the demo
                     // frame until — or unless — the ride pipeline emits again.
                     lastRideSnapshot?.let {
-                        publish(it.copy(battery = glassesBattery))
+                        publish(it.copy(battery = _glassesBattery.value))
                         mountScreenIfNeeded()
                     }
                 }
@@ -267,20 +270,29 @@ class MaverickBridge(
      * Keep the paired glasses connected. Polls the SDK link state, mirrors it for the UI,
      * and re-issues a secured connect whenever the device is paired but not connected (and
      * not already connecting). Runs for the extension's whole lifetime.
+     *
+     * To avoid draining the Karoo, the loop backs off once the glasses have been gone past
+     * [RECONNECT_GRACE_MS]: brief dropouts still recover within seconds, but a pair that's been
+     * switched off stops the futile fast reconnect scans and idles at [IDLE_POLL_INTERVAL_MS]
+     * (still retrying, so it reconnects on its own when the glasses come back on).
      */
     private fun startConnectionLoop() {
         connectionJob = scope.launch {
+            // Monotonic time the link first dropped (null while connected); drives the backoff below.
+            var offSinceMs: Long? = null
             while (isActive) {
+                var connected = false
                 runCatching {
                     val comm = Evs.instance().comm()
-                    val connected = comm.isConnected()
+                    connected = comm.isConnected()
                     if (connected != _connectionState.value) {
                         _connectionState.value = connected
                         GlassesLinkState.connected.value = connected
                         if (!connected) screenMounted = false
                     }
-                    // Glasses battery for the HUD's top-right corner; stamped onto snapshots in update().
-                    glassesBattery = if (connected) {
+                    // Glasses battery, stamped onto snapshots in update() and used to drive the HUD's
+                    // low-battery refresh slowdown + warning readout (see BatteryWarn).
+                    _glassesBattery.value = if (connected) {
                         runCatching { Evs.instance().glasses().batteryPercentage() }.getOrNull()?.takeIf { it in (0..100) }
                     } else {
                         null
@@ -326,7 +338,13 @@ class MaverickBridge(
                         }
                     }
                 }.onFailure { Timber.w(it, "connection loop error") }
-                delay(POLL_INTERVAL_MS)
+
+                // Slow the loop once the glasses have been gone past the grace window, so a pair
+                // that's been turned off stops draining the Karoo on reconnect scans.
+                val now = SystemClock.elapsedRealtime()
+                offSinceMs = if (connected) null else (offSinceMs ?: now)
+                val offForMs = offSinceMs?.let { now - it } ?: 0L
+                delay(if (offForMs >= RECONNECT_GRACE_MS) IDLE_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
             }
         }
     }
@@ -363,6 +381,11 @@ class MaverickBridge(
     }
 
     companion object {
+        /** Active link-poll/reconnect cadence while connected or freshly dropped. */
         private const val POLL_INTERVAL_MS = 2_000L
+        /** Keep retrying at the fast cadence for this long after a drop before backing off. */
+        private const val RECONNECT_GRACE_MS = 60_000L
+        /** Backed-off cadence once the glasses have been off past the grace window. */
+        private const val IDLE_POLL_INTERVAL_MS = 30_000L
     }
 }
