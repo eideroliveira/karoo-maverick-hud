@@ -25,6 +25,8 @@ object MaverickLink {
     val ready = MutableStateFlow(false)
     val connected = MutableStateFlow(false)
     val lastError = MutableStateFlow<String?>(null)
+    /** Glasses serial, captured at auth; surfaced as ManufacturerInfo on the Karoo sensor page. */
+    val serial = MutableStateFlow<String?>(null)
 
     @Volatile private var apiKey: ByteArray? = null
 
@@ -58,6 +60,7 @@ object MaverickLink {
 
             override fun onBeginAuth(serial: String, fwVersion: Int) {
                 Timber.i("Evs onBeginAuth serial=$serial fw=$fwVersion")
+                MaverickLink.serial.value = serial
                 applyApiKey(Evs.instance()) // make sure the key is set exactly when auth starts
             }
         })

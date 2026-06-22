@@ -12,8 +12,11 @@ import com.eider.karoomaverickhud.settings.PageMode
 import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
+import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.ActiveRidePage
 import io.hammerhead.karooext.models.DataType
+import io.hammerhead.karooext.models.Device
+import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.InRideAlert
 import io.hammerhead.karooext.models.RideState
 import java.util.Calendar
@@ -42,6 +45,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var karoo: KarooSystemService
     private lateinit var maverick: MaverickBridge
+    private lateinit var deviceProvider: MaverickDeviceProvider
     private lateinit var rideStateFlow: StateFlow<RideState>
 
     // In-ride field that shows the Maverick at a glance (battery, signal, brightness). Reads the
@@ -53,7 +57,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (!::maverick.isInitialized) return
             // Context-aware: brightness when connected, reconnect when down, pair when never paired.
-            if (maverick.onFieldTap() == MaverickBridge.TapResult.NEEDS_PAIR) openPairFlow()
+            if (maverick.onFieldTap() == MaverickBridge.TapResult.NEEDS_PAIR) openSettings(autoPair = true)
         }
     }
 
@@ -63,6 +67,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         karoo = KarooSystemService(applicationContext)
         maverick = MaverickBridge(applicationContext, scope)
+        deviceProvider = MaverickDeviceProvider(applicationContext, scope, maverick, extension)
 
         karoo.connect { connected ->
             Timber.i("Karoo system connected=$connected")
@@ -71,7 +76,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         rideStateFlow = karoo.consumerFlow<RideState>()
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
-        maverick.start()
+        // The bridge keeps the link always-connected (not ride-gated); it uses the ride-state feed
+        // only to re-arm its fast connect-retry window when a ride starts.
+        maverick.start(rideStateFlow)
 
         ContextCompat.registerReceiver(
             this,
@@ -85,22 +92,37 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     /**
-     * Ride-menu actions. "pair" opens the app straight into the pair flow — a reliable
-     * in-ride trigger (GPS is on during a ride, which the BLE scan needs) that, unlike a
-     * data-field tap, the Karoo guarantees to deliver.
+     * Ride-menu actions, both reliable in-ride triggers the Karoo guarantees to deliver (unlike a
+     * data-field tap):
+     *  - "pair" opens the app straight into the pair flow (GPS is on during a ride, which the BLE
+     *    scan needs).
+     *  - "configure" opens the settings app — the easy way into configuration without leaving the
+     *    ride screen for the Extensions menu.
      */
     override fun onBonusAction(actionId: String) {
         Timber.i("onBonusAction $actionId")
-        if (actionId == "pair") openPairFlow()
+        when (actionId) {
+            "pair" -> openSettings(autoPair = true)
+            "configure" -> openSettings(autoPair = false)
+        }
     }
 
-    /** Open the app straight into the pair flow (GPS is on mid-ride, which the BLE scan needs). */
-    private fun openPairFlow() {
+    private fun openSettings(autoPair: Boolean) {
         val intent = Intent(this, SettingsActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
+        if (autoPair) intent.putExtra(SettingsActivity.EXTRA_AUTO_PAIR, true)
         startActivity(intent)
     }
+
+    /**
+     * Device-provider hooks (enabled by `scansDevices="true"`): let the rider pair and monitor the
+     * glasses from the native Karoo Sensors UI. Delegated to [MaverickDeviceProvider]; the link
+     * stays owned by [MaverickBridge].
+     */
+    override fun startScan(emitter: Emitter<Device>) = deviceProvider.startScan(emitter)
+
+    override fun connectDevice(uid: String, emitter: Emitter<DeviceEvent>) =
+        deviceProvider.connectDevice(uid, emitter)
 
     override fun onDestroy() {
         Timber.i("RideHudExtension onDestroy")
@@ -217,7 +239,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
         // low-battery tiers (BatteryWarn) cut the BLE/redraw load that drains it faster. A change
         // re-subscribes the streams (same as a layout swap), so it only churns on a config change
-        // or a battery threshold crossing — both rare.
+        // or a battery threshold crossing — both rare. (This also makes the configured refresh
+        // interval take effect live, superseding the earlier captured-once read.)
         val refreshFlow = combine(configFlow, maverick.glassesBattery) { cfg, battery ->
             BatteryWarn.forLevel(battery)?.pollMs ?: cfg.refreshIntervalMs
         }.distinctUntilChanged()

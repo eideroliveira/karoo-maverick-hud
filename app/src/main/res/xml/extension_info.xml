@@ -3,7 +3,7 @@
     id="maverick_hud"
     displayName="@string/app_name"
     icon="@drawable/ic_hud"
-    scansDevices="false"
+    scansDevices="true"
     mapLayer="false"
     fitFile="false">
     <DataType
@@ -12,7 +12,18 @@
         graphical="true"
         icon="@drawable/ic_hud"
         typeId="glasses" />
+    <!-- Numeric battery field for the glasses, provided by the device (see MaverickDeviceProvider).
+         Lets the glasses be added/seen in the native Sensors UI and exposes their charge as a field. -->
+    <DataType
+        displayName="@string/glasses_battery_field"
+        description="@string/glasses_battery_desc"
+        graphical="false"
+        icon="@drawable/ic_hud"
+        typeId="glasses-battery" />
     <BonusAction
         displayName="@string/pair_action"
         actionId="pair" />
+    <BonusAction
+        displayName="@string/configure_action"
+        actionId="configure" />
 </ExtensionInfo>

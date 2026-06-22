@@ -121,6 +121,12 @@ class HudScreen : Screen(420f, 150f) {
 
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
+    // Last frame actually rendered, so onUpdateUI can no-op when nothing changed. The bridge only
+    // pushes a *new* snapshot object when content changes (it dedupes identical frames), so a
+    // reference check suffices for the data; control-window state is folded in via [controlSignature].
+    @Volatile private var lastRenderedSnapshot: HudSnapshot? = null
+    private var lastControlSignature = Int.MIN_VALUE
+
     /** Set by [MaverickBridge] to handle temple-pad touches (page switching). */
     @Volatile var onTouchPad: ((TouchDirection) -> Unit)? = null
 
@@ -256,6 +262,14 @@ class HudScreen : Screen(420f, 150f) {
 
     override fun onUpdateUI(timestampMs: Long) {
         val snap = snapshot
+        // The glasses call this every frame. When neither the pushed snapshot nor the control
+        // window changed since the last render, re-applying identical text/positions just re-dirties
+        // elements and re-flushes them over BLE — so bail out and let the prior frame stand.
+        val controlSig = controlSignature()
+        if (snap === lastRenderedSnapshot && controlSig == lastControlSignature) return
+        lastRenderedSnapshot = snap
+        lastControlSignature = controlSig
+
         renderControlWindow(snap)
         renderBatteryWarning(snap)
 
@@ -370,6 +384,15 @@ class HudScreen : Screen(420f, 150f) {
         batteryText.setVisibility(visible)
         brightText.setVisibility(visible)
         if (!visible) sigBars.forEach { it.setVisibility(false) }
+    }
+
+    /** Folds the control-window state into one int so onUpdateUI can detect a change cheaply. */
+    private fun controlSignature(): Int {
+        var h = if (controlOpen) 1 else 0
+        h = h * 131 + ctrlBrightness
+        h = h * 131 + (if (ctrlAuto) 1 else 0)
+        h = h * 131 + ctrlSignal
+        return h
     }
 
     private fun blankCell(i: Int) {
