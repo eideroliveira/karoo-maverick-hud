@@ -65,6 +65,19 @@ object HudPreviewBuilder {
             )
             DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION ->
                 mapOf(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 83_000.0) // ms → "1:23"
+            // Strava live segment
+            DataType.Type.SEGMENT_TIME_TO_PR -> mapOf(DataType.Field.SEGMENT_PR_DELTA_TIME to -5_000.0) // 5s ahead
+            DataType.Type.SEGMENT_TIME_TO_KOM -> mapOf(DataType.Field.SEGMENT_KOM_DELTA_TIME to 12_000.0)
+            DataType.Type.SEGMENT_TIME -> mapOf(DataType.Field.SEGMENT_TIME_ELAPSED to 95_000.0) // ms → "1:35"
+            DataType.Type.SEGMENT_PR -> mapOf(DataType.Field.SEGMENT_PR_TIME to 100_000.0)
+            DataType.Type.SEGMENT_DISTANCE_REMAINING -> mapOf(DataType.Field.SEGMENT_DISTANCE_REMAINING to 600.0)
+            DataType.Type.SEGMENT_ELEVATION_REMAINING -> mapOf(DataType.Field.SEGMENT_ELEVATION_REMAINING to 45.0)
+            // Climb
+            DataType.Type.ELEVATION_GRADE -> mapOf(DataType.Field.ELEVATION_GRADE to (5.0 + jit() * 6.0))
+            DataType.Type.VERTICAL_SPEED -> mapOf(DataType.Field.VERTICAL_SPEED to (900.0 + jit() * 400.0))
+            DataType.Type.DISTANCE_TO_TOP -> mapOf(DataType.Field.DISTANCE_TO_TOP to 1_800.0)
+            DataType.Type.ELEVATION_TO_TOP -> mapOf(DataType.Field.ELEVATION_TO_TOP to 210.0)
+            DataType.Type.CLIMB_NUMBER -> mapOf(DataType.Field.CLIMB_NUMBER to 2.0, DataType.Field.TOTAL_CLIMBS to 3.0)
             else -> mapOf(dataTypeId to jit() * 100.0)
         }
         return StreamState.Streaming(DataPoint(dataTypeId = dataTypeId, values = values))

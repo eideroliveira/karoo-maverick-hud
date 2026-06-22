@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,8 +50,10 @@ import kotlinx.coroutines.launch
 
 private const val MAX_PAGES = 5
 
-/** Sentinel "page index" for the workout page tab (stored separately from the numbered pages). */
+/** Sentinel "page indexes" for the auto pages (stored separately from the numbered pages). */
 private const val WORKOUT_TAB = -1
+private const val SEGMENT_TAB = -2
+private const val CLIMB_TAB = -3
 
 /** Return a copy of [list] with elements [a] and [b] swapped. */
 private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
@@ -60,18 +63,41 @@ private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
 @Composable
 fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map<String, DemoVal>) {
     val slotCount = cellsForRows(cfg.rows)
-    var active by remember { mutableStateOf(0) } // numbered page index, or WORKOUT_TAB
+    var active by remember { mutableStateOf(0) } // numbered page index, or an auto-page sentinel
     var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) } // page, slot
     val pages = cfg.pages
     val isWorkout = active == WORKOUT_TAB
-    val cur = if (isWorkout) WORKOUT_TAB else active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
-    val curPage = if (isWorkout) cfg.workoutPage.take(slotCount) else pages.getOrNull(cur) ?: emptyList()
+    val isSegment = active == SEGMENT_TAB
+    val isClimb = active == CLIMB_TAB
+    val isSpecial = active < 0
+    val cur = if (isSpecial) active else active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    val curPage = when {
+        isWorkout -> cfg.workoutPage.take(slotCount)
+        isSegment -> cfg.segmentPage.take(slotCount)
+        isClimb -> cfg.climbPage.take(slotCount)
+        else -> pages.getOrNull(cur) ?: emptyList()
+    }
+
+    // Discover other extensions' data fields once, so the picker can offer them (MPA, time to
+    // summit, …) alongside the built-ins, which stay the defaults. Registered globally so the lens
+    // preview can resolve their labels too.
+    val discovered = remember { com.eider.karoomaverickhud.extension.KarooDataTypeCatalog.discover(ctx) }
+    val extUiFields = remember(discovered) { discovered.associate { it.id to UiField(it.id, it.label, "", "bolt", null) } }
+    LaunchedEffect(extUiFields) { ExtensionFieldRegistry.fields = extUiFields }
+    val pickerFields = remember(extUiFields) { UI_FIELDS + extUiFields }
+    val pickerGroups = remember(discovered) {
+        UI_FIELD_GROUPS + discovered.groupBy { it.extensionName }.toList().map { (name, list) -> name to list.map { it.id } }
+    }
 
     fun setPages(next: List<List<String>>) { scope.launch { HudPreferences.setPages(ctx, next) } }
-    /** Persist an edit to whichever page is being edited — the workout page or a numbered one. */
+    /** Persist an edit to whichever page is being edited — an auto page or a numbered one. */
     fun setCurPage(next: List<String>) {
-        if (isWorkout) scope.launch { HudPreferences.setWorkoutPage(ctx, next) }
-        else setPages(pages.mapIndexed { i, p -> if (i == cur) next else p })
+        when {
+            isWorkout -> scope.launch { HudPreferences.setWorkoutPage(ctx, next) }
+            isSegment -> scope.launch { HudPreferences.setSegmentPage(ctx, next) }
+            isClimb -> scope.launch { HudPreferences.setClimbPage(ctx, next) }
+            else -> setPages(pages.mapIndexed { i, p -> if (i == cur) next else p })
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -84,6 +110,8 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             HudPreferences.setRows(ctx, r)
                             HudPreferences.setPages(ctx, pages.map { it.take(r * 2) })
                             HudPreferences.setWorkoutPage(ctx, cfg.workoutPage.take(r * 2))
+                            HudPreferences.setSegmentPage(ctx, cfg.segmentPage.take(r * 2))
+                            HudPreferences.setClimbPage(ctx, cfg.climbPage.take(r * 2))
                         }
                     }
                 }
@@ -118,20 +146,11 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         }
                     }
                 }
-                // The workout page — always present, shown on the glasses only mid-workout.
-                Box(
-                    Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
-                        .background(if (isWorkout) K.accent else K.surface2)
-                        .border(1.dp, if (isWorkout) K.accent else K.line2, RoundedCornerShape(10.dp))
-                        .clickable(remember { MutableInteractionSource() }, null) { active = WORKOUT_TAB }
-                        .padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        KIcon("bolt", 14.dp, if (isWorkout) K.onAccent else K.text2)
-                        KText("Workout", color = if (isWorkout) K.onAccent else K.text2, size = 13.sp, weight = FontWeight.SemiBold)
-                    }
-                }
+                // The auto pages — always present, each shown on the glasses only when its trigger
+                // is live (mid-workout / on a Strava segment / on a climb).
+                AutoPageTab("Workout", "bolt", isWorkout) { active = WORKOUT_TAB }
+                AutoPageTab("Segment", "time", isSegment) { active = SEGMENT_TAB }
+                AutoPageTab("Climb", "distance", isClimb) { active = CLIMB_TAB }
             }
 
             // editable lens
@@ -140,7 +159,13 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                     Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 16.dp, bottom = 14.dp)) {
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween) {
-                            KText(if (isWorkout) "Workout page" else "Page ${cur + 1}", color = K.text, size = 17.sp, weight = FontWeight.Bold, family = CondFamily)
+                            val title = when {
+                                isWorkout -> "Workout page"
+                                isSegment -> "Segment page"
+                                isClimb -> "Climb page"
+                                else -> "Page ${cur + 1}"
+                            }
+                            KText(title, color = K.text, size = 17.sp, weight = FontWeight.Bold, family = CondFamily)
                             KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 12.sp)
                         }
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -148,9 +173,14 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 selected = if (picker?.first == cur) picker!!.second else -1,
                                 onSlot = { picker = cur to it }, width = 408.dp)
                         }
-                        if (isWorkout) {
+                        if (isSpecial) {
+                            val help = when {
+                                isWorkout -> "Appears by itself as the first page while a structured workout is loaded — it can't be removed or reordered."
+                                isSegment -> "Takes over the glasses automatically while a Strava live segment is running. Add extension fields (e.g. MPA, time to summit) from the picker."
+                                else -> "Takes over automatically while you're on a climb (when no Strava segment is running). Add extension fields (e.g. MPA, time to summit) from the picker."
+                            }
                             KText(
-                                "Appears by itself as the first page while a structured workout is loaded — it can't be removed or reordered.",
+                                help,
                                 color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 14.dp),
                             )
                         } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -178,7 +208,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
         picker?.let { (_, slot) ->
             val current = curPage.getOrNull(slot)
             FieldPickerSheet(
-                current = current, used = curPage, onClose = { picker = null },
+                current = current, used = curPage, groups = pickerGroups, fields = pickerFields, onClose = { picker = null },
                 onPick = { fid ->
                     setCurPage(curPage.toMutableList().also { if (slot < it.size) it[slot] = fid else it.add(fid) })
                     picker = null
@@ -192,6 +222,24 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
     }
 }
 
+/** A tab for an auto page (workout / segment / climb) — present always, highlighted when selected. */
+@Composable
+private fun AutoPageTab(label: String, icon: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
+            .background(if (on) K.accent else K.surface2)
+            .border(1.dp, if (on) K.accent else K.line2, RoundedCornerShape(10.dp))
+            .clickable(remember { MutableInteractionSource() }, null) { onClick() }
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            KIcon(icon, 14.dp, if (on) K.onAccent else K.text2)
+            KText(label, color = if (on) K.onAccent else K.text2, size = 13.sp, weight = FontWeight.SemiBold)
+        }
+    }
+}
+
 @Composable
 private fun FieldPickerSheet(
     current: String?,
@@ -199,6 +247,8 @@ private fun FieldPickerSheet(
     onPick: (String) -> Unit,
     onRemove: () -> Unit,
     onClose: () -> Unit,
+    groups: List<Pair<String, List<String>>> = UI_FIELD_GROUPS,
+    fields: Map<String, UiField> = UI_FIELDS,
 ) {
     KBottomSheet("Choose field", onClose = onClose) {
         Column(Modifier.padding(bottom = 20.dp)) {
@@ -207,11 +257,11 @@ private fun FieldPickerSheet(
                     KButton("Remove this field", icon = "trash", variant = KBtnVariant.Danger, modifier = Modifier.fillMaxWidth(), onClick = onRemove)
                 }
             }
-            UI_FIELD_GROUPS.forEach { (group, ids) ->
+            groups.forEach { (group, ids) ->
                 KText(group.uppercase(), color = K.text3, size = 11.5.sp, weight = FontWeight.SemiBold,
                     letterSpacing = 1.3.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp))
                 ids.forEach { id ->
-                    val f = UI_FIELDS[id] ?: return@forEach
+                    val f = fields[id] ?: return@forEach
                     val isUsed = id in used && id != current
                     val isCur = id == current
                     Row(

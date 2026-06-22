@@ -137,8 +137,12 @@ data class WorkoutTarget(val value: Double?, val min: Double?, val max: Double?)
     val displayValue: Int? get() = (value ?: if (min != null && max != null) (min + max) / 2 else null)?.roundToInt()
 }
 
-/** How a field's value is read & formatted. Drives unit, conversion and zone coloring. */
-enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER, STEPS }
+/**
+ * How a field's value is read & formatted. Drives unit, conversion and zone coloring.
+ * DELTA_TIME is a signed time (Strava ±vs PR/KOM, green ahead / red behind); GRADE is a one-decimal
+ * percent; CLIMB_STEPS renders climb number as "current/total".
+ */
+enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER, STEPS, DELTA_TIME, GRADE, CLIMB_STEPS }
 
 /**
  * A field the HUD knows how to render. [id] is the Karoo [DataType.Type]. [label] is the picker
@@ -211,6 +215,19 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.WORKOUT_POWER_TARGET, "PWR TGT", FieldKind.NUMBER, HudIcon.POWER, unit = "W tgt", valueField = DataType.Field.WORKOUT_TARGET_VALUE),
     FieldSpec(DataType.Type.WORKOUT_CADENCE_TARGET, "CAD TGT", FieldKind.NUMBER, HudIcon.CADENCE, unit = "rpm tgt", valueField = DataType.Field.WORKOUT_TARGET_VALUE),
     FieldSpec(DataType.Type.WORKOUT_INTERVAL_COUNT, "STEP", FieldKind.STEPS, HudIcon.TIME, unit = "step"),
+    // ---- Strava live segment (shown on the auto segment page while a segment is running) ----
+    FieldSpec(DataType.Type.SEGMENT_TIME_TO_PR, "vs PR", FieldKind.DELTA_TIME, HudIcon.TIME, unit = "vs PR", valueField = DataType.Field.SEGMENT_PR_DELTA_TIME),
+    FieldSpec(DataType.Type.SEGMENT_TIME_TO_KOM, "vs KOM", FieldKind.DELTA_TIME, HudIcon.TIME, unit = "vs KOM", valueField = DataType.Field.SEGMENT_KOM_DELTA_TIME),
+    FieldSpec(DataType.Type.SEGMENT_TIME, "SEG TIME", FieldKind.TIME, HudIcon.TIME, unit = "seg", valueField = DataType.Field.SEGMENT_TIME_ELAPSED),
+    FieldSpec(DataType.Type.SEGMENT_PR, "PR", FieldKind.TIME, HudIcon.TIME, unit = "PR", valueField = DataType.Field.SEGMENT_PR_TIME),
+    FieldSpec(DataType.Type.SEGMENT_DISTANCE_REMAINING, "SEG DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "seg left", valueField = DataType.Field.SEGMENT_DISTANCE_REMAINING),
+    FieldSpec(DataType.Type.SEGMENT_ELEVATION_REMAINING, "SEG ELEV", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m seg", valueField = DataType.Field.SEGMENT_ELEVATION_REMAINING),
+    // ---- climb (shown on the auto climb page while on a climb, when no segment is running) ----
+    FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.DISTANCE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
+    FieldSpec(DataType.Type.VERTICAL_SPEED, "VAM", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "VAM", valueField = DataType.Field.VERTICAL_SPEED),
+    FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
+    FieldSpec(DataType.Type.ELEVATION_TO_TOP, "ELEV TOP", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m top", valueField = DataType.Field.ELEVATION_TO_TOP),
+    FieldSpec(DataType.Type.CLIMB_NUMBER, "CLIMB", FieldKind.CLIMB_STEPS, HudIcon.DISTANCE, unit = "climb"),
 )
 
 /** One rendered field: the value, its unit/label, a zone color, and an optional icon. */
@@ -234,6 +251,12 @@ data class HudSnapshot(
     val paused: Boolean,
     val recording: Boolean,
     val pageIndex: Int,
+    /**
+     * Index of a page that should take over the display (a live Strava segment or climb auto-page).
+     * The bridge snaps to it on the rising edge and suppresses auto-cycling while it's set; null
+     * means normal paging. Workout pages don't pin — they ride along in the cycle as before.
+     */
+    val pinnedPage: Int? = null,
     /** Rows to lay out (2 or 3); drives the screen's vertical placement and active-cell count. */
     val rows: Int = MAX_ROWS,
     /** Time of day "HH:mm" for the top-left corner; blank hides it. */
@@ -279,9 +302,10 @@ object FieldFormat {
         zones: ZoneConfig,
         ctx: FormatContext? = null,
         gear: GearLayout = GearLayout(),
+        extLabels: Map<String, String> = emptyMap(),
     ): HudCell {
         val spec = specByDataType[dataTypeId]
-        return if (spec != null) formatSpec(spec, state, imperial, zones, ctx, gear) else formatGeneric(dataTypeId, state)
+        return if (spec != null) formatSpec(spec, state, imperial, zones, ctx, gear) else formatGeneric(dataTypeId, state, extLabels)
     }
 
     /** HUD unit text for a spec — the explicit override, else the kind's base unit + any suffix. */
@@ -307,6 +331,29 @@ object FieldFormat {
     fun workoutActive(intervalCount: StreamState): Boolean {
         val dp = (intervalCount as? StreamState.Streaming)?.dataPoint ?: return false
         return (dp.values[DataType.Field.WORKOUT_STEP_COUNT]?.toInt() ?: 0) > 0
+    }
+
+    /**
+     * Whether a Strava live segment is currently running, from the
+     * [DataType.Type.SEGMENT_DISTANCE_REMAINING] stream — the segment fields only stream a positive
+     * distance-remaining while on a segment (Idle/zero otherwise). Gates and pins the segment page.
+     */
+    fun segmentActive(state: StreamState): Boolean {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return false
+        val remaining = dp.values[DataType.Field.SEGMENT_DISTANCE_REMAINING] ?: dp.singleValue
+        return (remaining ?: 0.0) > 0.0
+    }
+
+    /**
+     * Whether the rider is on a climb, from the [DataType.Type.CLIMB] stream — distance/elevation to
+     * the top only stream positive while on a climb. Gates and pins the climb page (which only
+     * appears when no segment is running).
+     */
+    fun climbActive(state: StreamState): Boolean {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return false
+        val toTop = dp.values[DataType.Field.DISTANCE_TO_TOP] ?: 0.0
+        val elevToTop = dp.values[DataType.Field.ELEVATION_TO_TOP] ?: 0.0
+        return toTop > 0.0 || elevToTop > 0.0
     }
 
     private fun targetOf(state: StreamState): WorkoutTarget {
@@ -344,7 +391,12 @@ object FieldFormat {
         }
     }
 
-    private fun formatGeneric(dataTypeId: String, state: StreamState): HudCell {
+    /**
+     * Fallback for fields the HUD has no [FieldSpec] for — chiefly extension-provided fields the
+     * rider picked (MPA, time to summit, …). We can't know their units, so we render the raw single
+     * value and label it with the extension's display name (shortened) when one is known.
+     */
+    private fun formatGeneric(dataTypeId: String, state: StreamState, extLabels: Map<String, String>): HudCell {
         val raw = (state as? StreamState.Streaming)?.dataPoint
         val v = raw?.singleValue
         val value = when {
@@ -352,7 +404,8 @@ object FieldFormat {
             v == v.roundToInt().toDouble() -> v.roundToInt().toString()
             else -> "%.1f".format(v)
         }
-        return HudCell(value, "", HudColor.GREEN)
+        val unit = extLabels[dataTypeId]?.take(12).orEmpty()
+        return HudCell(value, unit, HudColor.GREEN)
     }
 
     /** Render a known [FieldSpec] into a [HudCell], dispatching on [FieldSpec.kind]. */
@@ -402,6 +455,19 @@ object FieldFormat {
             FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
             FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
+            // Strava ±delta vs PR/KOM (v is signed ms): ahead → green, behind → red.
+            FieldKind.DELTA_TIME -> HudCell(formatDelta(v), unit, deltaColor(v), spec.icon)
+            FieldKind.GRADE -> HudCell(v?.let { "%.1f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
+            FieldKind.CLIMB_STEPS -> {
+                val total = raw?.values?.get(DataType.Field.TOTAL_CLIMBS)?.toInt() ?: 0
+                val current = (raw?.values?.get(DataType.Field.CLIMB_NUMBER) ?: 0.0).toInt()
+                val text = when {
+                    total > 0 -> "$current/$total"
+                    current > 0 -> "$current"
+                    else -> "--"
+                }
+                HudCell(text, unit, HudColor.WHITE, spec.icon)
+            }
             FieldKind.RATIO -> HudCell(v?.let { "%.2f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
             FieldKind.NUMBER -> HudCell(v.intOrDash(), unit, HudColor.WHITE, spec.icon)
             FieldKind.STEPS -> {
@@ -513,6 +579,28 @@ object FieldFormat {
         val m = (s % 3600) / 60
         val sec = s % 60
         return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
+    }
+
+    /**
+     * Signed time delta (Strava vs PR/KOM), [millis] negative = ahead. Rendered as "±m:ss"
+     * (or "±h:mm:ss" for the rare long delta). Null when the segment isn't reporting a delta.
+     */
+    private fun formatDelta(millis: Double?): String {
+        if (millis == null) return "--"
+        val totalSec = (abs(millis) / 1000.0).roundToInt()
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        val sign = if (millis < 0) "-" else "+"
+        return if (h > 0) "$sign%d:%02d:%02d".format(h, m, s) else "$sign%d:%02d".format(m, s)
+    }
+
+    /** Ahead of PR/KOM (negative delta) → green, behind (positive) → red, even/unknown → white. */
+    private fun deltaColor(millis: Double?): HudColor = when {
+        millis == null -> HudColor.WHITE
+        millis < 0 -> HudColor.GREEN
+        millis > 0 -> HudColor.RED
+        else -> HudColor.WHITE
     }
 
     private fun formatBalance(point: DataPoint?): String {
