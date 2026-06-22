@@ -79,6 +79,26 @@ class WorkoutFieldFormatTest {
     }
 
     @Test
+    fun perMetricFallback_powerOnlyWorkoutLeavesCadenceRegular() {
+        // A power-only workout step: a power target streams, the cadence target stays Idle.
+        // Power must go composite while cadence falls back to its regular field + coloring.
+        val ctx = FormatContext()
+        cell(
+            DataType.Type.WORKOUT_POWER_TARGET,
+            streaming(DataType.Type.WORKOUT_POWER_TARGET, DataType.Field.WORKOUT_TARGET_VALUE to 250.0),
+            ctx,
+        )
+        cell(DataType.Type.WORKOUT_CADENCE_TARGET, StreamState.Idle, ctx) // no cadence target prescribed
+
+        val power = cell(DataType.Type.POWER, streaming(DataType.Type.POWER, DataType.Field.POWER to 250.0), ctx)
+        assertEquals("250/250", power.value) // composite
+
+        val cadence = cell(DataType.Type.CADENCE, streaming(DataType.Type.CADENCE, DataType.Field.CADENCE to 88.0), ctx)
+        assertEquals("88", cadence.value) // regular cadence field, no "/target"
+        assertEquals(HudColor.GREEN, cadence.color) // regular cadence coloring (delta -2 from ideal 90)
+    }
+
+    @Test
     fun bandOnlyTargetDisplaysMidpoint() {
         val t = WorkoutTarget(value = null, min = 240.0, max = 260.0)
         assertTrue(t.isSet)
