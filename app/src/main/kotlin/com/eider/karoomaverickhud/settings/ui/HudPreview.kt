@@ -138,9 +138,11 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
         KText(demo?.display ?: "--", color = color, size = (if (big) 33 else 27).sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Label + icon use dim grey (K.text2); only the value above takes the zone color —
+            // mirrors HudScreen's LABEL_RGBA so the preview reads exactly like the glasses.
             val parts: List<@Composable () -> Unit> = buildList {
-                if (cfg.showIcons) add { KIcon(field?.icon ?: "bolt", (if (big) 16 else 14).dp, color, stroke = 2.4f) }
-                add { KText(label, color = color, size = (if (big) 14 else 12).sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
+                if (cfg.showIcons) add { KIcon(field?.icon ?: "bolt", (if (big) 16 else 14).dp, K.text2, stroke = 2.4f) }
+                add { KText(label, color = K.text2, size = (if (big) 14 else 12).sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
             }
             (if (right) parts.asReversed() else parts).forEach { it() }
         }
@@ -303,9 +305,11 @@ private fun EditSlot(
                 KText(demo?.display ?: "--", color = color, size = (if (big) 27 else 23).sp,
                     weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    // Label + icon dim grey (K.text2); value above keeps the zone color — same split
+                    // as the glasses (HudScreen LABEL_RGBA) and the read-only LensCell preview.
                     val parts: List<@Composable () -> Unit> = buildList {
-                        if (cfg.showIcons) add { KIcon(field.icon, 10.dp, color, stroke = 2.4f) }
-                        add { KText(field.unit.ifEmpty { field.label }, color = color, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
+                        if (cfg.showIcons) add { KIcon(field.icon, 10.dp, K.text2, stroke = 2.4f) }
+                        add { KText(field.unit.ifEmpty { field.label }, color = K.text2, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
                     }
                     (if (right) parts.asReversed() else parts).forEach { it() }
                 }

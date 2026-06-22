@@ -66,13 +66,14 @@ class HudScreen : Screen(420f, 150f) {
                 row(false, 88f, gap), row(true, 88f, gap),    // BL, BR
             )
         } else {
-            // Denser value face (~25px) over the same small unit, so three value+unit rows
-            // (3 × ~43px) still fit the 150px lens.
-            val gap = 25f
+            // Larger value face (~31px) over a smaller unit (~13px) for a stronger hierarchy;
+            // three value+unit rows (3 × ~44px) still fit the 150px lens. The gap matches the
+            // value height so the unit tucks just beneath it.
+            val gap = 31f
             arrayOf(
-                row(false, 6f, gap), row(true, 6f, gap),      // TL, TR
-                row(false, 102f, gap), row(true, 102f, gap),  // BL, BR
-                row(false, 54f, gap), row(true, 54f, gap),    // ML, MR (centre)
+                row(false, 5f, gap), row(true, 5f, gap),      // TL, TR
+                row(false, 101f, gap), row(true, 101f, gap),  // BL, BR
+                row(false, 53f, gap), row(true, 53f, gap),    // ML, MR (centre)
             )
         }
     }
@@ -87,16 +88,21 @@ class HudScreen : Screen(420f, 150f) {
     private val icons = Array(cellCount) { Image() }
 
     // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
-    // assets/fonts. Each occupies its own glasses font slot. Values use a larger face than their
-    // unit labels; the value face also steps down on the denser 5–6 field (three-row) pages so
-    // value + unit still clear the 150px lens. The HxW token in each filename is parsed by the SDK
-    // to set the glyph dimensions, so the generated names are kept verbatim.
+    // assets/fonts. Each occupies its own glasses font slot. Both the value and unit faces step
+    // per layout: the roomy ≤4-field (two-row) pages get a big value + medium unit, while the
+    // denser 5–6 field (three-row) pages push the value larger and the unit smaller for a stronger
+    // hierarchy — value + unit still clear the 150px lens (3 × (31+13)px). The HxW token in each
+    // filename is parsed by the SDK to set the glyph dimensions, so the generated names are verbatim.
     private val valueFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s1)
-    private val valueFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.25x18.2bpp.sifz", Font.Slot.s2)
-    private val unitFont = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
+    private val valueFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.31x22.2bpp.sifz", Font.Slot.s2)
+    private val unitFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
+    private val unitFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.13x9.2bpp.sifz", Font.Slot.s4)
 
-    /** Big value face on the roomy ≤4-field (two-row) pages; the denser face on 5–6 field pages. */
+    /** Big value face on the roomy ≤4-field (two-row) pages; the larger dense face on 5–6 field pages. */
     private fun valueFontFor(count: Int): Font = if (count <= 4) valueFontBig else valueFontDense
+
+    /** Medium unit on ≤4-field pages; the smaller dense unit on the tighter 5–6 field pages. */
+    private fun unitFontFor(count: Int): Font = if (count <= 4) unitFontBig else unitFontDense
     private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
     private val clockText = Text() // time of day (shown inside the control window)
@@ -166,7 +172,7 @@ class HudScreen : Screen(420f, 150f) {
                 .addTo(this)
             units[i]
                 .setText("")
-                .setResource(unitFont)
+                .setResource(unitFontFor(layoutCount))
                 .setTextAlign(Align.left)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
@@ -255,9 +261,13 @@ class HudScreen : Screen(420f, 150f) {
     private fun applyCount(count: Int) {
         layoutCount = count
         slots = slotsFor(count)
-        // ≤4-field pages get the big value face, 5–6-field pages the denser one.
+        // ≤4-field pages get the big value + medium unit; 5–6-field pages the larger value + smaller unit.
         val vf = valueFontFor(count)
-        for (i in 0 until cellCount) values[i].setResource(vf)
+        val uf = unitFontFor(count)
+        for (i in 0 until cellCount) {
+            values[i].setResource(vf)
+            units[i].setResource(uf)
+        }
     }
 
     override fun onUpdateUI(timestampMs: Long) {
@@ -328,8 +338,11 @@ class HudScreen : Screen(420f, 150f) {
         values[i].setText(cell?.value ?: "").setForegroundColor(color)
         values[i].setTextAlign(align).setXY(anchorX, slot.valueY)
 
+        // The colored value carries the zone signal; the unit/label stays white so it recedes
+        // behind the value (a second hierarchy cue beyond size) and only the value's hue competes
+        // for the eye — fewer colored elements per page reads cleaner on the see-through LCOS.
         val labelText = cell?.units.orEmpty()
-        units[i].setText(labelText).setForegroundColor(color)
+        units[i].setText(labelText).setForegroundColor(LABEL_RGBA)
         units[i].setTextAlign(align).setXY(anchorX, slot.labelY)
 
         val icon = cell?.icon
@@ -344,7 +357,8 @@ class HudScreen : Screen(420f, 150f) {
             // Icon sits on the inner side of the label: after it on the left, before it on the right.
             val labelW = if (labelText.isEmpty()) 0f else units[i].getMeasuredContentWidth()
             val iconX = if (slot.isRight) (rightX - labelW) - iconGap - iconW else leftX + labelW + iconGap
-            icons[i].setForegroundColor(color).setXY(iconX, slot.iconY).setVisibility(true)
+            // Icon is part of the label, not the signal — keep it white alongside the unit text.
+            icons[i].setForegroundColor(LABEL_RGBA).setXY(iconX, slot.iconY).setVisibility(true)
         }
     }
 
@@ -403,18 +417,36 @@ class HudScreen : Screen(420f, 150f) {
     }
 
     private fun colorRgba(color: HudColor): Int = when (color) {
-        HudColor.WHITE -> EvsColor.White.rgba
-        HudColor.GREEN -> EvsColor.Green.rgba
-        HudColor.YELLOW -> EvsColor.Yellow.rgba
-        HudColor.ORANGE -> EvsColor.Orange.rgba
-        HudColor.RED -> LIGHT_RED_RGBA           // EvsColor.Red renders too dim on LCOS in daylight
-        HudColor.PURPLE -> PINK_RGBA             // EvsColor.Purple renders too dim on LCOS in daylight
-        HudColor.CYAN -> EvsColor.Cyan.rgba
+        HudColor.WHITE -> WHITE_RGBA
+        HudColor.GREEN -> GREEN_RGBA
+        HudColor.YELLOW -> YELLOW_RGBA
+        HudColor.ORANGE -> ORANGE_RGBA
+        HudColor.RED -> RED_RGBA
+        HudColor.PURPLE -> PURPLE_RGBA
+        HudColor.CYAN -> CYAN_RGBA
     }
 
     companion object {
-        private val LIGHT_RED_RGBA = EvsColors.fromRgb(0xFF, 0x7B, 0x7B)
-        private val PINK_RGBA = EvsColors.fromRgb(0xFF, 0x60, 0xB0)
+        // Single tuning surface for the on-glasses zone palette. Red/Purple use explicit bright RGB
+        // because stock EvsColor.Red/Purple render too dim on the LCOS in daylight (confirmed
+        // on-device); the rest keep the stock hues. The closest pairs to read apart at a glance are
+        // YELLOW vs ORANGE and WHITE vs CYAN — if they're hard to distinguish on-device, separate
+        // them here (push Orange redder / Cyan bluer via EvsColors.fromRgb) and mirror the new value
+        // in KarooTheme's K.z* tokens so the settings preview still matches the glasses.
+        private val WHITE_RGBA = EvsColor.White.rgba
+        private val GREEN_RGBA = EvsColor.Green.rgba
+        private val YELLOW_RGBA = EvsColor.Yellow.rgba
+        private val ORANGE_RGBA = EvsColor.Orange.rgba
+        private val RED_RGBA = EvsColors.fromRgb(0xFF, 0x7B, 0x7B)     // light red — stock too dim
+        private val PURPLE_RGBA = EvsColors.fromRgb(0xFF, 0x60, 0xB0)  // pink — stock too dim
+        private val CYAN_RGBA = EvsColor.Cyan.rgba
+
+        // Secondary ink (unit labels + field icons): a dim grey, so the colored value is the only
+        // bright/colored element and stays the most legible thing on the LCOS. Units are static per
+        // field and quickly memorised, so they don't need full brightness. Matches K.text2 in
+        // KarooTheme so the settings preview reads the same. Bump toward white here if the labels
+        // turn out too faint to read on-device.
+        private val LABEL_RGBA = EvsColors.fromRgb(0x99, 0xA1, 0xAC)
     }
 
     override fun onTouch(touch: TouchDirection) {
