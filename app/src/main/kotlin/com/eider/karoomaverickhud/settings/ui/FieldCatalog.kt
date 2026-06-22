@@ -101,11 +101,11 @@ val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
     ),
 )
 
-/** Icon colour used next to a field in the picker — tinted by its zone kind. */
+/** Icon colour used next to a field in the picker — tinted by its zone kind (chrome accents). */
 fun pickerIconColor(field: UiField): Color = when (field.zone) {
-    ZoneKind.POWER -> K.zOrange
-    ZoneKind.HR -> K.zRed
-    ZoneKind.CADENCE -> K.zGreen
+    ZoneKind.POWER -> K.cOrange
+    ZoneKind.HR -> K.cRed
+    ZoneKind.CADENCE -> K.cGreen
     null -> K.text
 }
 

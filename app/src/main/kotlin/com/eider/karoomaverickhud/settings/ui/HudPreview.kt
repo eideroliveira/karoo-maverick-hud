@@ -145,8 +145,8 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
             // exactly like the glasses.
             val showIcon = cfg.showIcons && FieldFormat.iconFor(fieldId) != null
             val parts: List<@Composable () -> Unit> = buildList {
-                if (showIcon) add { KIcon(field?.icon ?: "bolt", (if (big) 16 else 14).dp, K.text2, stroke = 2.4f) }
-                else add { KText(label, color = K.text2, size = (if (big) 14 else 12).sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
+                if (showIcon) add { KIcon(field?.icon ?: "bolt", (if (big) 16 else 14).dp, Lens.label, stroke = 2.4f) }
+                else add { KText(label, color = Lens.label, size = (if (big) 14 else 12).sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
             }
             (if (right) parts.asReversed() else parts).forEach { it() }
         }
@@ -217,7 +217,7 @@ fun GlassesPreview(
             ) {
                 repeat(totalPages) { i ->
                     Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp))
-                        .background(if (i == pageIndex) K.accent else Color(0x40FFFFFF)))
+                        .background(if (i == pageIndex) Lens.accent else Color(0x40FFFFFF)))
                 }
             }
         }
@@ -283,14 +283,14 @@ private fun EditSlot(
     val isAdd = fieldId == null && i == page.size
     val sel = selected == i
     val demo = fieldId?.let { values[it] }
-    val color = if (field != null) cellColor(field, demo, cfg) else K.text3
+    val color = if (field != null) cellColor(field, demo, cfg) else Lens.faint
     val shape = RoundedCornerShape(10.dp)
     val borderColor = when {
-        field != null -> if (sel) K.accent else Color.Transparent
-        sel -> K.accent
+        field != null -> if (sel) Lens.accent else Color.Transparent
+        sel -> Lens.accent
         else -> Color(0x38FFFFFF)
     }
-    val bg = if (sel) K.accentDim else if (field != null) Color.Transparent else Color(0x08FFFFFF)
+    val bg = if (sel) Lens.accentDim else if (field != null) Color.Transparent else Color(0x08FFFFFF)
     Box(
         Modifier
             // Fixed width — a min-width slot whose Add/Empty content fillMaxWidth would otherwise
@@ -314,16 +314,16 @@ private fun EditSlot(
                     // same split as the glasses (HudScreen) and the read-only LensCell preview.
                     val showIcon = cfg.showIcons && fieldId?.let { FieldFormat.iconFor(it) } != null
                     val parts: List<@Composable () -> Unit> = buildList {
-                        if (showIcon) add { KIcon(field.icon, 10.dp, K.text2, stroke = 2.4f) }
-                        else add { KText(field.unit.ifEmpty { field.label }, color = K.text2, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
+                        if (showIcon) add { KIcon(field.icon, 10.dp, Lens.label, stroke = 2.4f) }
+                        else add { KText(field.unit.ifEmpty { field.label }, color = Lens.label, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
                     }
                     (if (right) parts.asReversed() else parts).forEach { it() }
                 }
             }
         } else {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                KIcon("plus", 18.dp, if (isAdd) K.accent else K.text3)
-                KText(if (isAdd) "Add" else "Empty", color = if (isAdd) K.accent else K.text3,
+                KIcon("plus", 18.dp, if (isAdd) Lens.accent else Lens.faint)
+                KText(if (isAdd) "Add" else "Empty", color = if (isAdd) Lens.accent else Lens.faint,
                     size = 10.sp, weight = FontWeight.SemiBold)
             }
         }
