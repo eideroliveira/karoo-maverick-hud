@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -72,6 +74,9 @@ class MaverickBridge(
     context: Context,
     private val scope: CoroutineScope,
 ) {
+    // Held for DataStore writes triggered by glasses gestures (the saver toggle on a data-field tap).
+    private val appContext = context.applicationContext
+
     private val _connectionState = MutableStateFlow(value = false)
     val connectionState: StateFlow<Boolean> = _connectionState.asStateFlow()
 
@@ -119,6 +124,15 @@ class MaverickBridge(
     private var ctrlAuto = false
     @Volatile private var ctrlSignal = 0
 
+    // Battery-saver bookkeeping. [saverEngaged] tracks the last applied saver state so brightness is
+    // only forced on the rising edge (rider temple-pad overrides then stick); the pre-saver brightness
+    // is remembered so leaving saver restores what they had rather than guessing a level.
+    @Volatile private var saverEngaged = false
+    private var preSaverBrightness: Int? = null
+    private var preSaverAuto = false
+    // Tracks our last display-power command so we only call the SDK on a real on↔off transition.
+    @Volatile private var displayPoweredOn = true
+
     private var connectionJob: Job? = null
 
     /**
@@ -135,6 +149,7 @@ class MaverickBridge(
         startRetryArmer()
         startPageCycler()
         startPreviewObserver()
+        startSaverObserver()
     }
 
     /** Open a fresh connect-retry window. */
@@ -180,7 +195,10 @@ class MaverickBridge(
         lastPinnedPage = pin
         // Clamp in case the layout shrank (e.g. switched to a Karoo page with fewer fields).
         if (snapshot.pages.isNotEmpty() && (pageIndex >= snapshot.pages.size)) pageIndex = 0
-        val stamped = snapshot.copy(pageIndex = pageIndex, battery = _glassesBattery.value)
+        // Stamp eco here (not just in publish) so it's part of the structural dedup key below —
+        // otherwise an unstamped frame would never equal the eco-stamped lastSnapshot while saver is
+        // active, defeating the dedup and pushing *more* frames (the opposite of saver's intent).
+        val stamped = snapshot.copy(pageIndex = pageIndex, battery = _glassesBattery.value, eco = Eco.active.value)
         lastRideSnapshot = stamped
         // Skip redundant pushes: when idle/paused or the sensors are steady, the pipeline keeps
         // ticking out identical frames that would otherwise re-flush the glasses every interval.
@@ -211,9 +229,103 @@ class MaverickBridge(
 
     /** Push a snapshot to the glasses and mirror it for the Karoo data field. */
     private fun publish(s: HudSnapshot) {
-        lastSnapshot = s
-        hudScreen.apply(s)
-        HudState.snapshot.value = s
+        // Stamp the live ECO flag so every pushed frame (ride, preview, page flip) carries the badge,
+        // then re-evaluate display power (blank while paused/stopped in saver) from this frame.
+        val stamped = s.copy(eco = Eco.active.value)
+        lastSnapshot = stamped
+        hudScreen.apply(stamped)
+        HudState.snapshot.value = stamped
+        applyDisplayPower(stamped)
+    }
+
+    /** Computed battery-saver state for a given config/battery/link snapshot. */
+    private data class EcoDecision(val active: Boolean, val auto: Boolean, val critical: Boolean)
+
+    private fun decideSaver(cfg: HudConfig, battery: Int?, connected: Boolean): EcoDecision {
+        // Auto-engage only when we actually have a battery reading at or below the threshold.
+        val auto = battery != null && battery <= cfg.saverThresholdPct
+        val active = cfg.saverEnabled || auto
+        val critical = active && battery != null && battery <= SaverTuning.CRITICAL_PCT
+        // [connected] gates nothing here (manual saver still slows the pipeline while disconnected),
+        // but the brightness/display levers it drives are themselves no-ops without a link.
+        return EcoDecision(active, auto, critical)
+    }
+
+    /**
+     * Observe config + battery + link and mirror the resulting saver state into [Eco] (which the
+     * pipeline and data field read). The display/brightness levers are applied here; the poll and
+     * page-cycle levers read [Eco.active] live in their own loops.
+     */
+    private fun startSaverObserver() {
+        scope.launch {
+            combine(configState, _glassesBattery, _connectionState) { cfg, battery, connected ->
+                decideSaver(cfg, battery, connected)
+            }.distinctUntilChanged().collect { applySaver(it) }
+        }
+    }
+
+    private fun applySaver(decision: EcoDecision) {
+        val (active, auto, critical) = decision
+        if (active && !saverEngaged) {
+            // Entering saver: remember what the rider had so we can hand it back on the way out.
+            preSaverBrightness = GlassesLinkState.brightness.value
+                ?: runCatching { Evs.instance().display().getBrightness().toInt() }.getOrNull()
+            preSaverAuto = GlassesLinkState.autoBrightness.value
+        }
+        Eco.active.value = active
+        Eco.auto.value = auto
+        Eco.critical.value = critical
+        if (active) {
+            forceBrightness(if (critical) SaverTuning.CRITICAL_BRIGHTNESS else SaverTuning.SAVER_BRIGHTNESS)
+        } else if (saverEngaged) {
+            // Leaving saver: restore the pre-saver brightness/auto rather than leave it dimmed.
+            if (preSaverAuto) restoreAuto() else preSaverBrightness?.let { forceBrightness(it) }
+        }
+        saverEngaged = active
+        applyDisplayPower(lastSnapshot)
+    }
+
+    /** Force a fixed brightness, killing auto first (the firmware otherwise keeps overriding it). */
+    private fun forceBrightness(level: Int) {
+        if (!_connectionState.value) return
+        val lvl = level.coerceIn(0, 100)
+        runCatching {
+            Evs.instance().display().autoBrightness().enable(isEnabled = false)
+            Evs.instance().display().setBrightness(lvl.toShort())
+        }.onFailure { Timber.w(it, "saver setBrightness failed") }
+        ctrlBrightness = lvl
+        ctrlAuto = false
+        GlassesLinkState.brightness.value = lvl
+        GlassesLinkState.autoBrightness.value = false
+        if (controlOpen) pushControl()
+    }
+
+    private fun restoreAuto() {
+        if (!_connectionState.value) return
+        runCatching { Evs.instance().display().autoBrightness().enable(isEnabled = true) }
+            .onFailure { Timber.w(it, "saver restore auto failed") }
+        ctrlAuto = true
+        GlassesLinkState.autoBrightness.value = true
+        if (controlOpen) pushControl()
+    }
+
+    /**
+     * The biggest saver lever: blank the glasses display while saver is engaged and the ride is
+     * paused/stopped, re-arming it on resume. The control window and settings preview always keep
+     * the display lit so they stay usable. No-op until the screen is mounted on a live link.
+     */
+    private fun applyDisplayPower(snap: HudSnapshot) {
+        if (!_connectionState.value || !screenMounted) return
+        val keepOn = !Eco.active.value || controlOpen ||
+            HudState.previewSnapshot.value != null || snap.recording
+        if (keepOn == displayPoweredOn) return
+        val ok = runCatching {
+            if (keepOn) Evs.instance().display().turnDisplayOn() else Evs.instance().display().turnDisplayOff()
+        }.onFailure { Timber.w(it, "display power toggle failed") }.isSuccess
+        if (ok) {
+            displayPoweredOn = keepOn
+            Timber.i("Saver display → ${if (keepOn) "ON" else "OFF"} (recording=${snap.recording})")
+        }
     }
 
     /**
@@ -290,6 +402,8 @@ class MaverickBridge(
                 Timber.d("control open: read bright=$ctrlBrightness auto=$ctrlAuto")
             }.onFailure { Timber.w(it, "read brightness") }
         }
+        // Opening the window during a paused-saver blank must re-light the display so it's legible.
+        applyDisplayPower(lastSnapshot)
         pushControl()
     }
 
@@ -364,7 +478,16 @@ class MaverickBridge(
                     if (connected != wasConnected) {
                         _connectionState.value = connected
                         GlassesLinkState.connected.value = connected
-                        if (!connected) screenMounted = false
+                        if (!connected) {
+                            screenMounted = false
+                            // The glasses powered off → their display is off; mountScreenIfNeeded
+                            // turns it back on on reconnect, so reset our tracking to match.
+                            displayPoweredOn = true
+                        } else if (Eco.active.value) {
+                            // Re-arm the saver dim on a fresh link: applySaver won't fire (the ECO
+                            // decision didn't change across the reconnect), so force it here.
+                            forceBrightness(if (Eco.critical.value) SaverTuning.CRITICAL_BRIGHTNESS else SaverTuning.SAVER_BRIGHTNESS)
+                        }
                     }
                     // A drop after a good connection is a transient (out of range, glasses slept) —
                     // re-arm the fast-retry window so we work to get back promptly.
@@ -440,6 +563,9 @@ class MaverickBridge(
 
                     nextDelay = when {
                         controlOpen -> CONTROL_INTERVAL_MS       // responsive brightness/signal
+                        // While connected in saver, stretch the telemetry poll to cut BLE wakeups
+                        // (never slows a reconnect — that path stays on the fast cadences below).
+                        connected && Eco.active.value -> maxOf(CONNECTED_INTERVAL_MS, SaverTuning.SAVER_POLL_MS)
                         connected -> CONNECTED_INTERVAL_MS       // hold the link, catch drops
                         armed -> CONNECT_RETRY_INTERVAL_MS       // fast retry within the window
                         else -> IDLE_POLL_INTERVAL_MS            // backed off; slow retry, still recovers
@@ -459,6 +585,7 @@ class MaverickBridge(
             // The glasses display is off by default — without this the screen mounts but
             // nothing is shown.
             Evs.instance().display().turnDisplayOn()
+            displayPoweredOn = true
             screenMounted = true
             Timber.i("HudScreen mounted; display on=${runCatching { Evs.instance().display().isDisplayOn() }.getOrNull()}")
         }.onFailure { Timber.w(it, "Failed to mount HudScreen") }
@@ -468,7 +595,9 @@ class MaverickBridge(
         scope.launch {
             while (isActive) {
                 val cfg = configState.value
-                delay(cfg.autoCycleMs.coerceAtLeast(1_000L))
+                val baseCycle = cfg.autoCycleMs.coerceAtLeast(1_000L)
+                // Saver lengthens the dwell (fewer redraws/BLE pushes) without stopping paging outright.
+                delay(if (Eco.active.value) maxOf(baseCycle, SaverTuning.SAVER_AUTOCYCLE_MS) else baseCycle)
                 if (HudState.previewSnapshot.value != null) continue // preview owns paging
                 if (lastSnapshot.pinnedPage != null) continue // a segment/climb page is pinned
                 if (configState.value.pageMode == PageMode.AUTO) {
@@ -483,17 +612,22 @@ class MaverickBridge(
     }
 
     /** Outcome of a data-field tap, so the extension knows whether it must open the pair UI. */
-    enum class TapResult { BRIGHTNESS, RECONNECTING, NEEDS_PAIR }
+    enum class TapResult { SAVER, RECONNECTING, NEEDS_PAIR }
 
     /**
-     * Single tap on the Karoo data field. Context-aware: cycle brightness while connected,
-     * otherwise kick an immediate reconnect — or report NEEDS_PAIR if nothing is paired yet so
-     * the extension can open the pair flow.
+     * Single tap on the Karoo data field. Context-aware: toggle battery-saver while connected
+     * (brightness moved to the temple pad / settings now that saver ships), otherwise kick an
+     * immediate reconnect — or report NEEDS_PAIR if nothing is paired yet so the extension can
+     * open the pair flow.
      */
     fun onFieldTap(): TapResult {
         if (_connectionState.value) {
-            cycleBrightness()
-            return TapResult.BRIGHTNESS
+            // Flip the persisted manual toggle; the saver observer re-derives [Eco] from the new
+            // config. (When saver is auto-engaged by low battery it stays on regardless.)
+            scope.launch {
+                HudPreferences.setSaverEnabled(appContext, !configState.value.saverEnabled)
+            }
+            return TapResult.SAVER
         }
         if (configState.value.maverickDeviceId == null) return TapResult.NEEDS_PAIR
         forceReconnect()

@@ -81,6 +81,14 @@ data class HudConfig(
     val showClock: Boolean,
     /** Whether the glasses draw each data field's icon next to its unit/label. */
     val showIcons: Boolean,
+    /**
+     * Manual battery-saver ("ECO") toggle. When on, the bridge dims the display, slows the BLE poll
+     * and HUD push, blanks while the ride is paused/stopped, and lengthens page cycling — all to
+     * stretch the glasses pack. Saver also auto-engages once the battery falls to [saverThresholdPct].
+     */
+    val saverEnabled: Boolean,
+    /** Glasses battery % at or below which saver auto-engages (shown as "ECO (auto)"). */
+    val saverThresholdPct: Int,
 ) {
     companion object {
         /** Seeded layout matching the original hard-coded two-page HUD. */
@@ -152,6 +160,8 @@ data class HudConfig(
             gear = GearConfig(),
             showClock = true,
             showIcons = false,
+            saverEnabled = false,
+            saverThresholdPct = com.eider.karoomaverickhud.maverick.SaverTuning.DEFAULT_THRESHOLD_PCT,
         )
     }
 }
@@ -178,6 +188,8 @@ object HudPreferences {
     private val KEY_GEAR = stringPreferencesKey("gear_json")
     private val KEY_SHOW_CLOCK = booleanPreferencesKey("show_clock")
     private val KEY_SHOW_ICONS = booleanPreferencesKey("show_icons")
+    private val KEY_SAVER_ENABLED = booleanPreferencesKey("saver_enabled")
+    private val KEY_SAVER_THRESHOLD = intPreferencesKey("saver_threshold_pct")
 
     fun flow(context: Context): Flow<HudConfig> = context.dataStore.data.map { prefs ->
         HudConfig(
@@ -205,6 +217,8 @@ object HudPreferences {
             gear = prefs[KEY_GEAR]?.let { decodeGear(it) } ?: HudConfig.DEFAULT.gear,
             showClock = prefs[KEY_SHOW_CLOCK] ?: HudConfig.DEFAULT.showClock,
             showIcons = prefs[KEY_SHOW_ICONS] ?: HudConfig.DEFAULT.showIcons,
+            saverEnabled = prefs[KEY_SAVER_ENABLED] ?: HudConfig.DEFAULT.saverEnabled,
+            saverThresholdPct = (prefs[KEY_SAVER_THRESHOLD] ?: HudConfig.DEFAULT.saverThresholdPct).coerceIn(0, 100),
         )
     }
 
@@ -250,6 +264,14 @@ object HudPreferences {
 
     suspend fun setShowIcons(context: Context, show: Boolean) {
         context.dataStore.edit { it[KEY_SHOW_ICONS] = show }
+    }
+
+    suspend fun setSaverEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { it[KEY_SAVER_ENABLED] = enabled }
+    }
+
+    suspend fun setSaverThreshold(context: Context, pct: Int) {
+        context.dataStore.edit { it[KEY_SAVER_THRESHOLD] = pct.coerceIn(0, 100) }
     }
 
     suspend fun setAutoCycleMs(context: Context, ms: Long) {

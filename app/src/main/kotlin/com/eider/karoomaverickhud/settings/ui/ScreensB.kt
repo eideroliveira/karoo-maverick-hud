@@ -467,6 +467,26 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 KText("1 Hz", color = K.text2, size = 17.sp, weight = FontWeight.SemiBold, family = CondFamily)
             }
         }
+
+        KSectionLabel("Battery saver")
+        CardBlock {
+            KRow {
+                KIconChip("battery")
+                Column(Modifier.weight(1f)) {
+                    KText("Battery saver", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                    KText("Dim, slow the HUD and blank when paused to stretch glasses runtime", color = K.text2, size = 12.5.sp)
+                }
+                KSwitch(cfg.saverEnabled) { scope.launch { HudPreferences.setSaverEnabled(ctx, it) } }
+            }
+            KRow(last = true) {
+                KIconChip("battery")
+                Column(Modifier.weight(1f)) {
+                    KText("Auto-engage below", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                    KText("Turn saver on automatically at this glasses battery level", color = K.text2, size = 12.5.sp)
+                }
+                KStepper(cfg.saverThresholdPct, { scope.launch { HudPreferences.setSaverThreshold(ctx, it) } }, min = 0, max = 90, step = 5, unit = "%")
+            }
+        }
         Spacer(Modifier.height(30.dp))
     }
 }

@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import androidx.core.content.ContextCompat
+import com.eider.karoomaverickhud.maverick.Eco
 import com.eider.karoomaverickhud.maverick.MaverickBridge
+import com.eider.karoomaverickhud.maverick.SaverTuning
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.PageMode
@@ -56,7 +58,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private val glassesTapReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (!::maverick.isInitialized) return
-            // Context-aware: brightness when connected, reconnect when down, pair when never paired.
+            // Context-aware: toggle saver when connected, reconnect when down, pair when never paired.
             if (maverick.onFieldTap() == MaverickBridge.TapResult.NEEDS_PAIR) openSettings(autoPair = true)
         }
     }
@@ -134,7 +136,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     }
 
     companion object {
-        /** Broadcast sent by a tap on the Karoo data field — cycles brightness when connected, else reconnects/pairs. */
+        /** Broadcast sent by a tap on the Karoo data field — toggles battery-saver when connected, else reconnects/pairs. */
         const val ACTION_GLASSES_TAP = "com.eider.karoomaverickhud.GLASSES_TAP"
     }
 
@@ -202,6 +204,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 priority.add(cfg.climbPage.take(cap))
             }
             Layout(priority + base, pinned)
+        }.combine(Eco.critical) { layout, critical ->
+            // Critical battery: collapse to one minimal page (speed + time) to squeeze out the final
+            // minutes. Overrides every priority/pinned page; the streams it needs are subscribed
+            // automatically since [cellsPipeline] derives its ids from the live layout.
+            if (critical) Layout(listOf(SaverTuning.MINIMAL_PAGE), pinnedPage = null) else layout
         }.distinctUntilChanged()
 
         val cellsPipeline = layoutFlow.flatMapLatest { layout ->
@@ -237,12 +244,20 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         }
 
         // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
-        // low-battery tiers (BatteryWarn) cut the BLE/redraw load that drains it faster. A change
-        // re-subscribes the streams (same as a layout swap), so it only churns on a config change
-        // or a battery threshold crossing — both rare. (This also makes the configured refresh
-        // interval take effect live, superseding the earlier captured-once read.)
-        val refreshFlow = combine(configFlow, maverick.glassesBattery) { cfg, battery ->
-            BatteryWarn.forLevel(battery)?.pollMs ?: cfg.refreshIntervalMs
+        // low-battery tiers (BatteryWarn) cut the BLE/redraw load that drains it faster, and slowed
+        // further while battery-saver is engaged (the slower of the battery-warn tier and the saver
+        // floor). A change re-subscribes the streams (same as a layout swap), so it only churns on a
+        // config change, a battery threshold crossing, or a saver flip — all rare. (This also makes
+        // the configured refresh interval take effect live, superseding the earlier captured-once read.)
+        val refreshFlow = combine(
+            configFlow, maverick.glassesBattery, Eco.active, Eco.critical,
+        ) { cfg, battery, saver, critical ->
+            val base = BatteryWarn.forLevel(battery)?.pollMs ?: cfg.refreshIntervalMs
+            when {
+                critical -> maxOf(base, SaverTuning.CRITICAL_REFRESH_MS)
+                saver -> maxOf(base, SaverTuning.SAVER_REFRESH_MS)
+                else -> base
+            }
         }.distinctUntilChanged()
 
         refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) }
