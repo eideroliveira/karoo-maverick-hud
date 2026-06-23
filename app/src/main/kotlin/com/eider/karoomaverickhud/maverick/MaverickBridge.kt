@@ -129,11 +129,12 @@ class MaverickBridge(
     @Volatile private var ctrlSignal = 0
 
     // Which control item the temple pad acts on while the window is open (0=Brightness, 1=Auto,
-    // 2=Radar, 3=Trajectory), cycled by long-tap. Radar/Trajectory mirror the saved config so the
-    // window shows their state; the toggles persist to HudPreferences.
+    // 2=Radar, 3=Trajectory, 4=Race), cycled by long-tap. Radar/Trajectory/Race mirror the saved
+    // config so the window shows their state; the toggles persist to HudPreferences.
     private var ctrlFocus = 0
     private var ctrlRadar = false
     private var ctrlTraj = false
+    private var ctrlRace = false
 
     // Battery-saver bookkeeping. [saverEngaged] tracks the last applied saver state so brightness is
     // only forced on the rising edge (rider temple-pad overrides then stick); the pre-saver brightness
@@ -429,6 +430,7 @@ class MaverickBridge(
             // Mirror the saved route-feature state so the window shows the right ON/OFF.
             ctrlRadar = configState.value.radarEnabled
             ctrlTraj = configState.value.trajectoryEnabled
+            ctrlRace = configState.value.raceMode
             runCatching {
                 ctrlBrightness = Evs.instance().display().getBrightness().toInt()
                 ctrlAuto = Evs.instance().display().autoBrightness().isEnabled()
@@ -465,7 +467,7 @@ class MaverickBridge(
         pushControl()
     }
 
-    /** Long-tap steps the control window's focus through Brightness → Auto → Radar → Trajectory. */
+    /** Long-tap steps the focus through Brightness → Auto → Radar → Trajectory → Race. */
     private fun cycleControlFocus() {
         ctrlFocus = (ctrlFocus + 1) % CONTROL_ITEMS
         pushControl()
@@ -477,6 +479,7 @@ class MaverickBridge(
             1 -> setAuto(increase)
             2 -> setRadarFeature(increase)
             3 -> setTrajFeature(increase)
+            4 -> setRaceFeature(increase)
             else -> adjustBrightness(if (increase) +10 else -10)
         }
     }
@@ -493,8 +496,14 @@ class MaverickBridge(
         pushControl()
     }
 
+    private fun setRaceFeature(enabled: Boolean) {
+        ctrlRace = enabled
+        scope.launch { HudPreferences.setRaceMode(appContext, enabled) }
+        pushControl()
+    }
+
     private fun pushControl() {
-        hudScreen.setControl(controlOpen, ctrlBrightness, ctrlAuto, ctrlSignal, ctrlFocus, ctrlRadar, ctrlTraj)
+        hudScreen.setControl(controlOpen, ctrlBrightness, ctrlAuto, ctrlSignal, ctrlFocus, ctrlRadar, ctrlTraj, ctrlRace)
     }
 
     private fun rssiToBars(rssi: Int): Int = when {
@@ -722,7 +731,7 @@ class MaverickBridge(
         private val TRAJ_ZOOM_LEVELS_M = floatArrayOf(100f, 200f, 400f)
 
         /** Focusable items in the in-ride control window: Brightness, Auto, Radar, Trajectory. */
-        private const val CONTROL_ITEMS = 4
+        private const val CONTROL_ITEMS = 5
 
         /** How long to fast-retry a connect before backing off to the slow idle cadence. */
         private const val CONNECT_WINDOW_MS = 3 * 60_000L
