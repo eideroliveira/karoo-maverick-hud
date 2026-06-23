@@ -202,11 +202,14 @@ fun GlassesPreview(
     onTap: (() -> Unit)? = null,
 ) {
     val big = page.size <= 4
-    // ≤4-field cells stack value+label in the standard 150px lens. The side-by-side 5–6-field cells
-    // are single-line but run the tall 42sp value, so three rows need a little more height than the
-    // 420×150 glasses-to-Compose fudge gives here.
-    val lensH = if (big) 150.dp else 168.dp
-    val colH = if (big) 126.dp else 144.dp
+    // The lens is a FIXED size regardless of field count. The glasses screen doesn't resize per
+    // page, and the hub preview auto-cycles pages with different field counts — a height that
+    // flipped between them would make the box jump on every cycle. Sized tall enough for the worst
+    // case (three rows of the side-by-side 42sp value) plus room for the page dots; ≤4-field pages
+    // keep the same box and just spread their cells toward the corners (SpaceBetween), which is how
+    // the real HUD places them anyway. [big] now only picks the per-cell layout/font, not the size.
+    val lensH = 208.dp
+    val colH = 172.dp
     val (left, right) = columnOrder(page.size)
     LensBox(width, lensHeight = lensH) {
         // centre fixation dot

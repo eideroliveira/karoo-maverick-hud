@@ -69,7 +69,7 @@ fun KBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                KText(title, color = K.text, size = 20.sp, weight = FontWeight.Bold, family = CondFamily)
+                KText(title, color = K.text, size = 23.sp, weight = FontWeight.Bold, family = CondFamily)
                 if (action != null) {
                     action()
                 } else {
@@ -77,7 +77,7 @@ fun KBottomSheet(
                         Modifier.clip(RoundedCornerShape(10.dp))
                             .clickable(remember { MutableInteractionSource() }, null, onClick = onClose)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
-                    ) { KText("Done", color = K.accent, size = 15.sp, weight = FontWeight.SemiBold, family = CondFamily) }
+                    ) { KText("Done", color = K.accent, size = 18.sp, weight = FontWeight.SemiBold, family = CondFamily) }
                 }
             }
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), content = content)

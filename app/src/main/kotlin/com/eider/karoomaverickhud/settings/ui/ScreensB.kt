@@ -128,8 +128,8 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 KRow(last = true) {
                     KIconChip("bolt")
                     Column(Modifier.weight(1f)) {
-                        KText("Race mode", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Cycle only your race pages + the auto-pages, switching hands-free", color = K.text2, size = 12.5.sp)
+                        KText("Race mode", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Cycle only your race pages + the auto-pages, switching hands-free", color = K.text2, size = 15.sp)
                     }
                     KSwitch(cfg.raceMode) { scope.launch { HudPreferences.setRaceMode(ctx, it) } }
                 }
@@ -148,7 +148,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             .clickable(remember { MutableInteractionSource() }, null) { active = i }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center,
-                    ) { KText("${i + 1}", color = if (on) K.onAccent else K.text2, size = 15.sp, weight = FontWeight.Bold, family = CondFamily) }
+                    ) { KText("${i + 1}", color = if (on) K.onAccent else K.text2, size = 18.sp, weight = FontWeight.Bold, family = CondFamily) }
                 }
                 if (pages.size < MAX_PAGES) {
                     Box(
@@ -163,7 +163,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            KIcon("plus", 16.dp, K.accent); KText("Page", color = K.accent, size = 13.sp, weight = FontWeight.SemiBold)
+                            KIcon("plus", 16.dp, K.accent); KText("Page", color = K.accent, size = 15.sp, weight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -186,8 +186,8 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 isClimb -> "Climb page"
                                 else -> "Page ${cur + 1}"
                             }
-                            KText(title, color = K.text, size = 17.sp, weight = FontWeight.Bold, family = CondFamily)
-                            KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 12.sp)
+                            KText(title, color = K.text, size = 20.sp, weight = FontWeight.Bold, family = CondFamily)
+                            KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 14.sp)
                         }
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             EditableHud(curPage, slotCount, cfg, values,
@@ -202,14 +202,14 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             }
                             KText(
                                 help,
-                                color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 14.dp),
+                                color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 14.dp),
                             )
                         } else Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             // Whether this page is shown while race mode is on.
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    KText("Race page", color = K.text, size = 15.sp, weight = FontWeight.Medium)
-                                    KText("Include this page in race mode's cycle", color = K.text2, size = 12.sp)
+                                    KText("Race page", color = K.text, size = 18.sp, weight = FontWeight.Medium)
+                                    KText("Include this page in race mode's cycle", color = K.text2, size = 14.sp)
                                 }
                                 KSwitch(raceFlags().getOrElse(cur) { true }) { setRacePage(cur, it) }
                             }
@@ -244,23 +244,23 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 KRow {
                     KIconChip("distance")
                     Column(Modifier.weight(1f)) {
-                        KText("Next-climb radar", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Previews the climb ahead — distance, ETA, grade — as you near it", color = K.text2, size = 12.5.sp)
+                        KText("Next-climb radar", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Previews the climb ahead — distance, ETA, grade — as you near it", color = K.text2, size = 15.sp)
                     }
                     KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
                 }
                 KRow(last = true) {
                     KIconChip("arrows")
                     Column(Modifier.weight(1f)) {
-                        KText("Trajectory map", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Heading-up map of the road ahead — auto-shows on descents", color = K.text2, size = 12.5.sp)
+                        KText("Trajectory map", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Heading-up map of the road ahead — auto-shows on descents", color = K.text2, size = 15.sp)
                     }
                     KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
                 }
             }
 
             KText("The centre of the lens stays clear for the road. Fields fill the edges from the corners in.",
-                color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 30.dp))
+                color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 30.dp))
         }
 
         picker?.let { (_, slot) ->
@@ -293,7 +293,7 @@ private fun AutoPageTab(label: String, icon: String, on: Boolean, onClick: () ->
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             KIcon(icon, 14.dp, if (on) K.onAccent else K.text2)
-            KText(label, color = if (on) K.onAccent else K.text2, size = 13.sp, weight = FontWeight.SemiBold)
+            KText(label, color = if (on) K.onAccent else K.text2, size = 15.sp, weight = FontWeight.SemiBold)
         }
     }
 }
@@ -316,7 +316,7 @@ private fun FieldPickerSheet(
                 }
             }
             groups.forEach { (group, ids) ->
-                KText(group.uppercase(), color = K.text3, size = 11.5.sp, weight = FontWeight.SemiBold,
+                KText(group.uppercase(), color = K.text3, size = 14.sp, weight = FontWeight.SemiBold,
                     letterSpacing = 1.3.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 6.dp))
                 ids.forEach { id ->
                     val f = fields[id] ?: return@forEach
@@ -334,11 +334,11 @@ private fun FieldPickerSheet(
                         }
                         Column(Modifier.weight(1f)) {
                             Row {
-                                KText(f.label, color = if (isUsed) K.text.copy(alpha = 0.5f) else K.text, size = 16.sp, weight = FontWeight.Medium)
-                                if (f.unit.isNotEmpty()) KText(" · ${f.unit}", color = K.text3, size = 13.sp)
+                                KText(f.label, color = if (isUsed) K.text.copy(alpha = 0.5f) else K.text, size = 19.sp, weight = FontWeight.Medium)
+                                if (f.unit.isNotEmpty()) KText(" · ${f.unit}", color = K.text3, size = 15.sp)
                             }
-                            if (isUsed) KText("already on this page", color = K.text2, size = 12.5.sp)
-                            else if (f.zone != null) KText("zone-coloured", color = K.text2, size = 12.5.sp)
+                            if (isUsed) KText("already on this page", color = K.text2, size = 15.sp)
+                            else if (f.zone != null) KText("zone-coloured", color = K.text2, size = 15.sp)
                         }
                         if (isCur) KIcon("check", 20.dp, K.accent)
                     }
@@ -379,15 +379,15 @@ fun GlassesScreen(
             KRow(last = !connected) {
                 KIconChip("glasses", color = if (connected) K.good else K.text3, iconSize = 21.dp)
                 Column(Modifier.weight(1f)) {
-                    KText(if (hasDevice) deviceName else "No glasses paired", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                    KText(if (hasDevice) deviceName else "No glasses paired", color = K.text, size = 19.sp, weight = FontWeight.Medium)
                     KText(
                         if (!hasDevice) "Tap pair to scan" else if (connected) "Connected over Bluetooth" else "Paired — not connected",
-                        color = if (connected) K.good else K.text2, size = 12.5.sp,
+                        color = if (connected) K.good else K.text2, size = 15.sp,
                     )
                 }
                 if (connected) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     KIcon("battery", 20.dp, K.text2)
-                    KText("${battery ?: "—"}%", color = K.text2, size = 18.sp, weight = FontWeight.Bold, family = CondFamily)
+                    KText("${battery ?: "—"}%", color = K.text2, size = 21.sp, weight = FontWeight.Bold, family = CondFamily)
                 }
             }
             if (connected) {
@@ -408,44 +408,44 @@ fun GlassesScreen(
 
         if (gpsBlocked) {
             KText("Location is off, so scanning finds nothing. Start a ride to enable GPS, then tap the Glasses data field to pair.",
-                color = K.bad, size = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp))
+                color = K.bad, size = 15.sp, lineHeight = 21.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp))
         }
 
         if (connected) {
             KSectionLabel("Glasses control")
             CardBlock {
                 KRow {
-                    KIconChip("eye"); Column(Modifier.weight(1f)) { KText("Display on", color = K.text, size = 16.sp, weight = FontWeight.Medium) }
+                    KIconChip("eye"); Column(Modifier.weight(1f)) { KText("Display on", color = K.text, size = 19.sp, weight = FontWeight.Medium) }
                     KSwitch(displayOn, onDisplayOn)
                 }
                 KRow {
                     KIconChip("brightness")
                     Column(Modifier.weight(1f)) {
-                        KText("Auto-brightness", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Adjusts to ambient light", color = K.text2, size = 12.5.sp)
+                        KText("Auto-brightness", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Adjusts to ambient light", color = K.text2, size = 15.sp)
                     }
                     KSwitch(autoBrightness, onAutoBrightness)
                 }
                 KRow {
                     KIconChip("sun")
                     Column(Modifier.weight(1f)) {
-                        KText("Brightness", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        if (autoBrightness) KText("Auto on — adjusting turns it off", color = K.text2, size = 12.5.sp)
+                        KText("Brightness", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        if (autoBrightness) KText("Auto on — adjusting turns it off", color = K.text2, size = 15.sp)
                     }
                     KStepper(brightness, onBrightness, min = 0, max = 100, step = 10, unit = "%")
                 }
                 KRow {
                     KIconChip("arrows")
                     Column(Modifier.weight(1f)) {
-                        KText("Screen X · IPD", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Nudge the image to your eye spacing", color = K.text2, size = 12.5.sp)
+                        KText("Screen X · IPD", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Nudge the image to your eye spacing", color = K.text2, size = 15.sp)
                     }
                     // The SDK rendering centre is an absolute pixel position (≈320), not a small
                     // offset — a wide range keeps "＋" usable; the SDK clamps out-of-bounds values.
                     KStepper(centerX, onCenterX, min = 0, max = 2000, step = 5, unit = "px")
                 }
                 KRow(last = true) {
-                    KIconChip("arrows"); Column(Modifier.weight(1f)) { KText("Screen Y", color = K.text, size = 16.sp, weight = FontWeight.Medium) }
+                    KIconChip("arrows"); Column(Modifier.weight(1f)) { KText("Screen Y", color = K.text, size = 19.sp, weight = FontWeight.Medium) }
                     KStepper(centerY, onCenterY, min = 0, max = 2000, step = 5, unit = "px")
                 }
             }
@@ -481,8 +481,8 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 KRow(onClick = { scope.launch { HudPreferences.setPageMode(ctx, mode) } }, last = i == modes.lastIndex && cfg.pageMode != PageMode.AUTO) {
                     KRadio(cfg.pageMode == mode)
                     Column(Modifier.weight(1f)) {
-                        KText(title, color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText(sub, color = K.text2, size = 12.5.sp)
+                        KText(title, color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText(sub, color = K.text2, size = 15.sp)
                     }
                 }
             }
@@ -490,7 +490,7 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 Box(Modifier.background(K.surface2)) {
                     KRow(last = true) {
                         KIconChip("time")
-                        Column(Modifier.weight(1f)) { KText("Seconds per page", color = K.text, size = 16.sp, weight = FontWeight.Medium) }
+                        Column(Modifier.weight(1f)) { KText("Seconds per page", color = K.text, size = 19.sp, weight = FontWeight.Medium) }
                         KStepper((cfg.autoCycleMs / 1000).toInt(), { scope.launch { HudPreferences.setAutoCycleMs(ctx, it * 1000L) } }, min = 2, max = 30, step = 1, unit = "sec")
                     }
                 }
@@ -502,26 +502,26 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("time")
                 Column(Modifier.weight(1f)) {
-                    KText("Show clock", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Time of day in the corner", color = K.text2, size = 12.5.sp)
+                    KText("Show clock", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Time of day in the corner", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.showClock) { scope.launch { HudPreferences.setShowClock(ctx, it) } }
             }
             KRow {
                 KIconChip("eye")
                 Column(Modifier.weight(1f)) {
-                    KText("Field icons", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Draw each field's icon next to its unit", color = K.text2, size = 12.5.sp)
+                    KText("Field icons", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Draw each field's icon next to its unit", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.showIcons) { scope.launch { HudPreferences.setShowIcons(ctx, it) } }
             }
             KRow(last = true) {
                 KIconChip("refresh")
                 Column(Modifier.weight(1f)) {
-                    KText("Refresh rate", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Locked to the Karoo's 1 Hz sensor cadence", color = K.text2, size = 12.5.sp)
+                    KText("Refresh rate", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Locked to the Karoo's 1 Hz sensor cadence", color = K.text2, size = 15.sp)
                 }
-                KText("1 Hz", color = K.text2, size = 17.sp, weight = FontWeight.SemiBold, family = CondFamily)
+                KText("1 Hz", color = K.text2, size = 20.sp, weight = FontWeight.SemiBold, family = CondFamily)
             }
         }
 
@@ -530,16 +530,16 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("distance")
                 Column(Modifier.weight(1f)) {
-                    KText("Next-climb radar", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Preview the climb ahead — distance, ETA, grade — as you approach it", color = K.text2, size = 12.5.sp)
+                    KText("Next-climb radar", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Preview the climb ahead — distance, ETA, grade — as you approach it", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
             }
             KRow(last = true) {
                 KIconChip("arrows")
                 Column(Modifier.weight(1f)) {
-                    KText("Trajectory map", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Draw the road ahead to read curves — auto-shows on descents", color = K.text2, size = 12.5.sp)
+                    KText("Trajectory map", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Draw the road ahead to read curves — auto-shows on descents", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
             }
@@ -550,16 +550,16 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("battery")
                 Column(Modifier.weight(1f)) {
-                    KText("Battery saver", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Dim, slow the HUD and blank when paused to stretch glasses runtime", color = K.text2, size = 12.5.sp)
+                    KText("Battery saver", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Dim, slow the HUD and blank when paused to stretch glasses runtime", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.saverEnabled) { scope.launch { HudPreferences.setSaverEnabled(ctx, it) } }
             }
             KRow(last = true) {
                 KIconChip("battery")
                 Column(Modifier.weight(1f)) {
-                    KText("Auto-engage below", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Turn saver on automatically at this glasses battery level", color = K.text2, size = 12.5.sp)
+                    KText("Auto-engage below", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Turn saver on automatically at this glasses battery level", color = K.text2, size = 15.sp)
                 }
                 KStepper(cfg.saverThresholdPct, { scope.launch { HudPreferences.setSaverThreshold(ctx, it) } }, min = 0, max = 90, step = 5, unit = "%")
             }

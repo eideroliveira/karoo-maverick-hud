@@ -81,16 +81,16 @@ fun ZoneRowsEditor(
             ) {
                 Box(Modifier.size(13.dp).clip(CircleShape).background(colors.getOrElse(i) { K.zWhite }))
                 Column(Modifier.weight(1f)) {
-                    KText("${z.name} · ${z.sub}", color = K.text, size = 15.sp, weight = FontWeight.Medium, maxLines = 1)
+                    KText("${z.name} · ${z.sub}", color = K.text, size = 18.sp, weight = FontWeight.Medium, maxLines = 1)
                     KText(
                         if (isLast) "${pctToVal(z.lo)}+ $unit" else "${pctToVal(z.lo)}–${pctToVal(z.hi)} $unit",
-                        color = K.text2, size = 12.5.sp, maxLines = 1,
+                        color = K.text2, size = 15.sp, maxLines = 1,
                     )
                 }
                 if (!isLast) {
                     KStepper(
                         value = z.hi, min = z.lo + 1, max = zones[i + 1].hi - 1, step = 1, unit = "%",
-                        valueWidth = 48.dp,
+                        valueWidth = 70.dp,
                         onChange = { newHi ->
                             onChange(
                                 zones.mapIndexed { j, zz ->
@@ -104,7 +104,7 @@ fun ZoneRowsEditor(
                         },
                     )
                 } else {
-                    KText("top", color = K.text3, size = 13.sp)
+                    KText("top", color = K.text3, size = 15.sp)
                 }
             }
             if (!isLast) Box(Modifier.fillMaxWidth().height(1.dp).background(K.line))
@@ -132,7 +132,7 @@ fun CadenceScale(ideal: Int) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(Modifier.size(2.dp, 8.dp).background(Color.White))
-                    KText(ideal.toString(), color = K.text, size = 13.sp, weight = FontWeight.Bold, family = CondFamily)
+                    KText(ideal.toString(), color = K.text, size = 15.sp, weight = FontWeight.Bold, family = CondFamily)
                 }
             }
         }
