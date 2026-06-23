@@ -91,14 +91,14 @@ fun HubScreen(
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     KIcon("battery", 17.dp, K.text2)
-                    KText(battery?.let { "$it%" } ?: "—", color = K.text2, size = 12.5.sp, weight = FontWeight.SemiBold, family = CondFamily)
+                    KText(battery?.let { "$it%" } ?: "—", color = K.text2, size = 15.sp, weight = FontWeight.SemiBold, family = CondFamily)
                 }
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 GlassesPreview(cfg, page, values, previewPage, cfg.pages.size, width = 448.dp,
                     onTap = if (cfg.pages.size > 1) onPreviewTap else null)
             }
-            KText("LIVE PREVIEW · TAP TO SWITCH PAGE", color = K.text3, size = 11.sp, letterSpacing = 1.sp,
+            KText("LIVE PREVIEW · TAP TO SWITCH PAGE", color = K.text3, size = 13.sp, letterSpacing = 1.sp,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
         }
 
@@ -162,10 +162,10 @@ fun HubCard(
             contentAlignment = Alignment.Center) { KIcon(icon, 23.dp, accent) }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KText(title, color = K.text, size = 18.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1)
+                KText(title, color = K.text, size = 21.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1)
                 status?.invoke()
             }
-            KText(summary, color = K.text2, size = 13.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+            KText(summary, color = K.text2, size = 15.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
             extra?.invoke()
         }
         KIcon("chevron", 20.dp, K.text3)
@@ -188,15 +188,15 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("power", color = K.cOrange)
                 Column(Modifier.weight(1f)) {
-                    KText("Functional Threshold", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Your 1-hour max power. Sets the power zones below.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
+                    KText("Functional Threshold", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Your 1-hour max power. Sets the power zones below.", color = K.text2, size = 15.sp, lineHeight = 20.sp)
                 }
                 KStepper(cfg.ftp, { scope.launch { HudPreferences.setFtp(ctx, it) } }, min = 80, max = 500, step = 5, unit = "watts")
             }
             Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 8.dp)) {
                 Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    KText("POWER ZONES", color = K.text2, size = 12.sp, weight = FontWeight.SemiBold)
-                    KText("% of FTP", color = K.text3, size = 11.sp)
+                    KText("POWER ZONES", color = K.text2, size = 14.sp, weight = FontWeight.SemiBold)
+                    KText("% of FTP", color = K.text3, size = 13.sp)
                 }
                 ZoneRowsEditor(ftpZones, cfg.ftp, "W", POWER_ZONE_UI_COLORS) { ftpZones = it }
                 KButton("Reset to default zones", icon = "refresh", variant = KBtnVariant.Ghost, height = 42.dp,
@@ -210,15 +210,15 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("heart", color = K.cRed)
                 Column(Modifier.weight(1f)) {
-                    KText("Max Heart Rate", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Your highest sustained bpm. Sets the HR zones below.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
+                    KText("Max Heart Rate", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Your highest sustained bpm. Sets the HR zones below.", color = K.text2, size = 15.sp, lineHeight = 20.sp)
                 }
                 KStepper(cfg.maxHr, { scope.launch { HudPreferences.setMaxHr(ctx, it) } }, min = 120, max = 220, step = 1, unit = "bpm")
             }
             Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 8.dp)) {
                 Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    KText("HR ZONES", color = K.text2, size = 12.sp, weight = FontWeight.SemiBold)
-                    KText("% of max", color = K.text3, size = 11.sp)
+                    KText("HR ZONES", color = K.text2, size = 14.sp, weight = FontWeight.SemiBold)
+                    KText("% of max", color = K.text3, size = 13.sp)
                 }
                 ZoneRowsEditor(hrZones, cfg.maxHr, "bpm", HR_ZONE_UI_COLORS) { hrZones = it }
                 KButton("Reset to default zones", icon = "refresh", variant = KBtnVariant.Ghost, height = 42.dp,
@@ -232,8 +232,8 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow(last = true) {
                 KIconChip("cadence", color = K.cGreen)
                 Column(Modifier.weight(1f)) {
-                    KText("Ideal Cadence", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                    KText("Target rpm. The HUD drifts yellow, then orange, as you move off it.", color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
+                    KText("Ideal Cadence", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Target rpm. The HUD drifts yellow, then orange, as you move off it.", color = K.text2, size = 15.sp, lineHeight = 20.sp)
                 }
                 KStepper(cfg.idealCadence, { scope.launch { HudPreferences.setIdealCadence(ctx, it) } }, min = 50, max = 120, step = 1, unit = "rpm")
             }
@@ -242,7 +242,7 @@ fun ProfileScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
 
         KText(
             "Zones drive the live colouring on the glasses — cyan when soft-pedalling, white when easy, then green, yellow, orange, red and purple as effort rises.",
-            color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 30.dp),
+            color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 30.dp),
         )
     }
 }
@@ -276,7 +276,7 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                         if (gear.source == "auto")
                             "Read live from your connected SRAM AXS or Shimano Di2 during the ride — chainrings, cassette and current gear come straight from the sensor."
                         else "Enter your drivetrain by hand for mechanical groupsets that don't report gearing.",
-                        color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 11.dp),
+                        color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 11.dp),
                     )
                 }
             }
@@ -289,10 +289,10 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                         KIcon("gear", 26.dp, K.cOrange)
                     }
                     Column(Modifier.weight(1f)) {
-                        KText(dt?.let { "${it.brand} ${it.name}" } ?: "Custom drivetrain", color = K.text, size = 19.sp, weight = FontWeight.Bold, family = CondFamily)
+                        KText(dt?.let { "${it.brand} ${it.name}" } ?: "Custom drivetrain", color = K.text, size = 22.sp, weight = FontWeight.Bold, family = CondFamily)
                         Row {
-                            KText("${gear.front.size}×${gear.rear.size}", color = K.text2, size = 13.sp)
-                            if (dt?.electronic == true) KText(" · Electronic", color = K.accent, size = 13.sp)
+                            KText("${gear.front.size}×${gear.rear.size}", color = K.text2, size = 15.sp)
+                            if (dt?.electronic == true) KText(" · Electronic", color = K.accent, size = 15.sp)
                         }
                     }
                     if (gear.source == "auto" && dt?.electronic == true) KPill("Live", color = K.good, bg = K.surface2, dot = true)
@@ -301,21 +301,21 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 // chainrings + cassette
                 Row(Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                        KText("CHAINRINGS", color = K.text3, size = 11.sp, letterSpacing = 0.7.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        KText("CHAINRINGS", color = K.text3, size = 13.sp, letterSpacing = 0.7.sp, modifier = Modifier.padding(bottom = 6.dp))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             gear.front.forEach { t ->
                                 Box(Modifier.clip(RoundedCornerShape(8.dp)).background(K.surface3).padding(horizontal = 11.dp, vertical = 3.dp)) {
-                                    KText("${t}T", color = K.text, size = 18.sp, weight = FontWeight.Bold, family = CondFamily)
+                                    KText("${t}T", color = K.text, size = 21.sp, weight = FontWeight.Bold, family = CondFamily)
                                 }
                             }
                         }
                     }
                     Box(Modifier.width(1.dp).height(64.dp).background(K.line))
                     Column(Modifier.weight(1f).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                        KText("CASSETTE", color = K.text3, size = 11.sp, letterSpacing = 0.7.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        KText("CASSETTE", color = K.text3, size = 13.sp, letterSpacing = 0.7.sp, modifier = Modifier.padding(bottom = 6.dp))
                         Row(verticalAlignment = Alignment.Bottom) {
-                            KText("${gear.rear.first()}–${gear.rear.last()}T", color = K.text, size = 18.sp, weight = FontWeight.Bold, family = CondFamily)
-                            KText(" · ${gear.rear.size}sp", color = K.text3, size = 13.sp)
+                            KText("${gear.rear.first()}–${gear.rear.last()}T", color = K.text, size = 21.sp, weight = FontWeight.Bold, family = CondFamily)
+                            KText(" · ${gear.rear.size}sp", color = K.text3, size = 15.sp)
                         }
                     }
                 }
@@ -334,14 +334,14 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 KRow(last = !gear.showField) {
                     KIconChip("gear", color = K.zOrange)
                     Column(Modifier.weight(1f)) {
-                        KText("Show gear field", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                        KText("Add a GEAR readout to your data pages", color = K.text2, size = 12.5.sp)
+                        KText("Show gear field", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Add a GEAR readout to your data pages", color = K.text2, size = 15.sp)
                     }
                     KSwitch(gear.showField) { save(gear.copy(showField = it)) }
                 }
                 if (gear.showField) {
                     Column(Modifier.padding(14.dp)) {
-                        KText("READOUT STYLE", color = K.text2, size = 12.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 9.dp))
+                        KText("READOUT STYLE", color = K.text2, size = 14.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 9.dp))
                         val displayValue = if (gear.display == "gear") "teeth" else gear.display // migrate legacy
                         KSegmented(listOf("teeth" to "Teeth", "ratio" to "Ratio", "inches" to "Inches"), displayValue) { save(gear.copy(display = it)) }
                         Row(
@@ -351,8 +351,8 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                         ) {
                             KIcon("gear", 22.dp, K.text)
                             Column {
-                                KText(gearExample(gear), color = K.text, size = 30.sp, weight = FontWeight.Bold, family = CondFamily)
-                                KText("example · ${gearStyleLabel(gear.display)}", color = K.text3, size = 11.sp)
+                                KText(gearExample(gear), color = K.text, size = 34.sp, weight = FontWeight.Bold, family = CondFamily)
+                                KText("example · ${gearStyleLabel(gear.display)}", color = K.text3, size = 13.sp)
                             }
                         }
                     }
@@ -368,9 +368,9 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                         KRow(onClick = { save(gear.copy(drivetrainId = d.id, front = d.front, rear = d.rear)); showPresets = false }) {
                             KIconChip("gear", color = K.cOrange)
                             Column(Modifier.weight(1f)) {
-                                KText("${d.brand} ${d.name}", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                                KText("${d.brand} ${d.name}", color = K.text, size = 19.sp, weight = FontWeight.Medium)
                                 KText("${d.front.joinToString("/")}T · ${d.rear.first()}–${d.rear.last()}T · ${d.speeds}sp${if (d.electronic) " · electronic" else ""}",
-                                    color = K.text2, size = 12.5.sp)
+                                    color = K.text2, size = 15.sp)
                             }
                         }
                     }
@@ -386,8 +386,8 @@ fun GearScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                         KRow(onClick = { save(gear.copy(rear = c.cogs)); showCassettes = false }) {
                             KIconChip("gear", color = if (selected) K.accent else K.cOrange)
                             Column(Modifier.weight(1f)) {
-                                KText(c.label, color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                                KText(c.cogs.joinToString("·"), color = K.text2, size = 12.sp, maxLines = 1)
+                                KText(c.label, color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                                KText(c.cogs.joinToString("·"), color = K.text2, size = 14.sp, maxLines = 1)
                             }
                             if (selected) KIcon("check", 20.dp, K.accent)
                         }
@@ -403,14 +403,14 @@ private fun ManualGear(gear: GearConfig, onSave: (GearConfig) -> Unit, onPresets
     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         KButton("Start from a preset", icon = "search", variant = KBtnVariant.Ghost, modifier = Modifier.fillMaxWidth(), onClick = onPresets)
         // Chainrings — one ring per row.
-        KText("CHAINRINGS", color = K.text2, size = 12.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
+        KText("CHAINRINGS", color = K.text2, size = 14.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(top = 2.dp))
         gear.front.forEachIndexed { i, t ->
             GearValueRow(if (i == 0) "Inner ring" else "Outer ring", t, 24, 60, "T") { v ->
                 onSave(gear.copy(front = gear.front.toMutableList().also { it[i] = v }))
             }
         }
         // Cassette — pick a real one from the datasheet (exact cog teeth, not evenly spaced).
-        KText("CASSETTE", color = K.text2, size = 12.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+        KText("CASSETTE", color = K.text2, size = 14.sp, weight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.surface2)
                 .clickable(remember { MutableInteractionSource() }, null, onClick = onChooseCassette)
@@ -418,8 +418,8 @@ private fun ManualGear(gear: GearConfig, onSave: (GearConfig) -> Unit, onPresets
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(Modifier.weight(1f)) {
-                KText("${gear.rear.first()}–${gear.rear.last()}T · ${gear.rear.size}sp", color = K.text, size = 16.sp, weight = FontWeight.Medium)
-                KText(gear.rear.joinToString("·"), color = K.text3, size = 11.5.sp, maxLines = 1)
+                KText("${gear.rear.first()}–${gear.rear.last()}T · ${gear.rear.size}sp", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                KText(gear.rear.joinToString("·"), color = K.text3, size = 14.sp, maxLines = 1)
             }
             KIcon("chevron", 18.dp, K.text3)
         }
@@ -433,8 +433,8 @@ private fun GearValueRow(label: String, value: Int, mn: Int, mx: Int, unit: Stri
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.surface2).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        KText(label, color = K.text, size = 15.sp, weight = FontWeight.Medium)
-        KStepper(value, onChange, min = mn, max = mx, step = 1, unit = unit.ifEmpty { null }, valueWidth = 44.dp)
+        KText(label, color = K.text, size = 18.sp, weight = FontWeight.Medium)
+        KStepper(value, onChange, min = mn, max = mx, step = 1, unit = unit.ifEmpty { null }, valueWidth = 56.dp)
     }
 }
 

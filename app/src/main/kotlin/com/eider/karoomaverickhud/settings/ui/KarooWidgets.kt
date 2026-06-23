@@ -54,7 +54,7 @@ fun KText(
     text: String,
     modifier: Modifier = Modifier,
     color: Color = K.text,
-    size: TextUnit = 16.sp,
+    size: TextUnit = 19.sp,
     weight: FontWeight = FontWeight.Normal,
     family: FontFamily = FontFamily.Default,
     letterSpacing: TextUnit = 0.sp,
@@ -114,7 +114,7 @@ fun KStepper(
     max: Int = 999,
     step: Int = 1,
     unit: String? = null,
-    valueWidth: Dp = 62.dp,
+    valueWidth: Dp = 78.dp,
 ) {
     // EXPLICIT total width (two 46dp buttons + 2×10dp gaps + value column). A wrap-content
     // stepper sitting next to a weight(1f) sibling produced an intermittent infinite measure
@@ -126,9 +126,9 @@ fun KStepper(
     ) {
         StepBtn("−", enabled = value > min) { onChange((value - step).coerceIn(min, max)) }
         Column(Modifier.width(valueWidth), horizontalAlignment = Alignment.CenterHorizontally) {
-            KText(value.toString(), color = K.text, size = 24.sp, weight = FontWeight.Bold, family = CondFamily,
+            KText(value.toString(), color = K.text, size = 28.sp, weight = FontWeight.Bold, family = CondFamily,
                 align = TextAlign.Center, maxLines = 1, softWrap = false, modifier = Modifier.fillMaxWidth())
-            if (unit != null) KText(unit, color = K.text3, size = 11.sp, maxLines = 1, softWrap = false)
+            if (unit != null) KText(unit, color = K.text3, size = 13.sp, maxLines = 1, softWrap = false)
         }
         StepBtn("＋", enabled = value < max) { onChange((value + step).coerceIn(min, max)) }
     }
@@ -147,7 +147,7 @@ private fun StepBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
             .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        KText(label, color = if (enabled) K.text else K.text3.copy(alpha = 0.5f), size = 24.sp)
+        KText(label, color = if (enabled) K.text else K.text3.copy(alpha = 0.5f), size = 28.sp)
     }
 }
 
@@ -177,7 +177,7 @@ fun <T> KSegmented(options: List<Pair<T, String>>, value: T, onChange: (T) -> Un
                     ) { onChange(v) },
                 contentAlignment = Alignment.Center,
             ) {
-                KText(label, color = if (on) K.onAccent else K.text2, size = 14.sp,
+                KText(label, color = if (on) K.onAccent else K.text2, size = 17.sp,
                     weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1)
             }
         }
@@ -188,7 +188,7 @@ fun <T> KSegmented(options: List<Pair<T, String>>, value: T, onChange: (T) -> Un
 @Composable
 fun KSectionLabel(text: String, modifier: Modifier = Modifier) {
     KText(
-        text.uppercase(), color = K.text3, size = 11.5.sp, weight = FontWeight.SemiBold,
+        text.uppercase(), color = K.text3, size = 14.sp, weight = FontWeight.SemiBold,
         letterSpacing = 1.5.sp, modifier = modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 9.dp),
     )
 }
@@ -245,10 +245,10 @@ fun KSettingRow(
     KRow(onClick = onClick, last = last) {
         if (icon != null) KIconChip(icon, color = iconColor)
         Column(Modifier.weight(1f)) {
-            KText(title, color = if (danger) K.bad else K.text, size = 16.sp, weight = FontWeight.Medium)
-            if (sub != null) KText(sub, color = K.text2, size = 12.5.sp, lineHeight = 17.sp)
+            KText(title, color = if (danger) K.bad else K.text, size = 19.sp, weight = FontWeight.Medium)
+            if (sub != null) KText(sub, color = K.text2, size = 15.sp, lineHeight = 20.sp)
         }
-        if (value != null) KText(value, color = K.text2, size = 17.sp, weight = FontWeight.SemiBold, family = CondFamily)
+        if (value != null) KText(value, color = K.text2, size = 20.sp, weight = FontWeight.SemiBold, family = CondFamily)
         trailing?.invoke()
         if (onClick != null && trailing == null && value == null) KIcon("chevron", 18.dp, K.text3)
     }
@@ -298,7 +298,7 @@ fun KButton(
             KIcon(icon, 18.dp, fg)
             Spacer(Modifier.width(9.dp))
         }
-        KText(label, color = fg, size = 16.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1)
+        KText(label, color = fg, size = 19.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1)
     }
 }
 
@@ -311,7 +311,7 @@ fun KPill(text: String, color: Color = K.text2, bg: Color = K.surface3, dot: Boo
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (dot) Box(Modifier.size(7.dp).clip(CircleShape).background(color))
-        KText(text, color = color, size = 12.sp, weight = FontWeight.SemiBold, maxLines = 1)
+        KText(text, color = color, size = 14.sp, weight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 

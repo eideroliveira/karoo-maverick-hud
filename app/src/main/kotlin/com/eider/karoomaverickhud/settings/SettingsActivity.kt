@@ -316,7 +316,7 @@ private fun AppBar(screen: String, onBack: () -> Unit) {
     val isHub = screen == "hub"
     Column {
         Row(
-            Modifier.fillMaxWidth().height(68.dp).background(K.surface).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().height(80.dp).background(K.surface).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (isHub) {
@@ -328,8 +328,8 @@ private fun AppBar(screen: String, onBack: () -> Unit) {
                     contentAlignment = Alignment.Center) { KIcon("back", 22.dp, K.text) }
             }
             Column(Modifier.weight(1f)) {
-                KText(title, color = K.text, size = 22.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1)
-                KText(sub.uppercase(), color = K.text3, size = 11.5.sp, letterSpacing = 0.7.sp, maxLines = 1)
+                KText(title, color = K.text, size = 26.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1)
+                KText(sub.uppercase(), color = K.text3, size = 14.sp, letterSpacing = 0.7.sp, maxLines = 1)
             }
             if (isHub) KPill("v0.1", color = K.text2, bg = K.surface2)
         }
