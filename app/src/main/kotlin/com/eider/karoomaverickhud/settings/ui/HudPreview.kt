@@ -135,19 +135,31 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val demo = values[fieldId]
     val color = cellColor(field, demo, cfg)
     val label = field?.unit?.takeIf { it.isNotEmpty() } ?: field?.label ?: ""
-    Column(horizontalAlignment = if (right) Alignment.End else Alignment.Start) {
-        KText(demo?.display ?: "--", color = color, size = (if (big) 33 else 27).sp,
+    // Value size mirrors HudScreen's faces: 33sp on ≤4-field pages, the taller 42sp face on the
+    // side-by-side 5–6-field pages. Only the label changes place. Label/icon use dim grey (K.text2)
+    // and only the value takes the zone color, so the preview reads exactly like the glasses.
+    val value: @Composable () -> Unit = {
+        KText(demo?.display ?: "--", color = color, size = (if (big) 33 else 42).sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            // With icons on, the icon replaces the label outright (only fields with a real glasses
-            // icon — extension fields have none, so they keep their text). Label/icon use dim grey
-            // (K.text2); only the value takes the zone color — mirrors HudScreen so the preview reads
-            // exactly like the glasses.
-            val showIcon = cfg.showIcons && FieldFormat.iconFor(fieldId) != null
-            val parts: List<@Composable () -> Unit> = buildList {
-                if (showIcon) add { KIcon(field?.icon ?: "bolt", (if (big) 16 else 14).dp, Lens.label, stroke = 2.4f) }
-                else add { KText(label, color = Lens.label, size = (if (big) 14 else 12).sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
-            }
+    }
+    // With icons on, the icon replaces the label outright (only fields with a real glasses icon —
+    // extension fields have none, so they keep their text).
+    val showIcon = cfg.showIcons && FieldFormat.iconFor(fieldId) != null
+    val labelOrIcon: @Composable () -> Unit = {
+        if (showIcon) KIcon(field?.icon ?: "bolt", 16.dp, Lens.label, stroke = 2.4f)
+        else KText(label, color = Lens.label, size = 14.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+    }
+    if (big) {
+        // ≤4-field pages: value on top, label/icon stacked just below.
+        Column(horizontalAlignment = if (right) Alignment.End else Alignment.Start) {
+            value()
+            Row(verticalAlignment = Alignment.CenterVertically) { labelOrIcon() }
+        }
+    } else {
+        // 5–6-field pages: value hugs the edge, label/icon beside it on the inboard side — the value
+        // stays on the outer edge so the order flips per column (mirrors HudScreen's side layout).
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            val parts = listOf(value, labelOrIcon)
             (if (right) parts.asReversed() else parts).forEach { it() }
         }
     }
@@ -190,9 +202,11 @@ fun GlassesPreview(
     onTap: (() -> Unit)? = null,
 ) {
     val big = page.size <= 4
-    // A 3-row page (5–6 fields) needs a taller lens or the bottom row's label clips at the edge.
-    val lensH = if (big) 150.dp else 184.dp
-    val colH = if (big) 126.dp else 160.dp
+    // ≤4-field cells stack value+label in the standard 150px lens. The side-by-side 5–6-field cells
+    // are single-line but run the tall 42sp value, so three rows need a little more height than the
+    // 420×150 glasses-to-Compose fudge gives here.
+    val lensH = if (big) 150.dp else 168.dp
+    val colH = if (big) 126.dp else 144.dp
     val (left, right) = columnOrder(page.size)
     LensBox(width, lensHeight = lensH) {
         // centre fixation dot
@@ -305,18 +319,30 @@ private fun EditSlot(
         contentAlignment = if (right) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
         if (field != null) {
-            Column(horizontalAlignment = if (right) Alignment.End else Alignment.Start) {
-                KText(demo?.display ?: "--", color = color, size = (if (big) 27 else 23).sp,
+            // Value size echoes the glasses faces (27sp ≤4, taller 32sp on the side-by-side 5–6
+            // pages); only its label changes place. With icons on, the icon replaces the label
+            // outright (fields without a real glasses icon keep their text). Label/icon dim grey
+            // (K.text2); value keeps the zone color — same split as the glasses (HudScreen) and
+            // the read-only LensCell preview.
+            val value: @Composable () -> Unit = {
+                KText(demo?.display ?: "--", color = color, size = (if (big) 27 else 32).sp,
                     weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
+            }
+            val showIcon = cfg.showIcons && fieldId?.let { FieldFormat.iconFor(it) } != null
+            val labelOrIcon: @Composable () -> Unit = {
+                if (showIcon) KIcon(field.icon, 10.dp, Lens.label, stroke = 2.4f)
+                else KText(field.unit.ifEmpty { field.label }, color = Lens.label, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+            }
+            if (big) {
+                // ≤4-field pages: value on top, label/icon stacked just below.
+                Column(horizontalAlignment = if (right) Alignment.End else Alignment.Start) {
+                    value()
+                    Row(verticalAlignment = Alignment.CenterVertically) { labelOrIcon() }
+                }
+            } else {
+                // 5–6-field pages: value and label/icon side-by-side, value on the outer edge.
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                    // With icons on, the icon replaces the label outright (fields without a real glasses
-                    // icon keep their text). Label/icon dim grey (K.text2); value keeps the zone color —
-                    // same split as the glasses (HudScreen) and the read-only LensCell preview.
-                    val showIcon = cfg.showIcons && fieldId?.let { FieldFormat.iconFor(it) } != null
-                    val parts: List<@Composable () -> Unit> = buildList {
-                        if (showIcon) add { KIcon(field.icon, 10.dp, Lens.label, stroke = 2.4f) }
-                        else add { KText(field.unit.ifEmpty { field.label }, color = Lens.label, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false) }
-                    }
+                    val parts = listOf(value, labelOrIcon)
                     (if (right) parts.asReversed() else parts).forEach { it() }
                 }
             }

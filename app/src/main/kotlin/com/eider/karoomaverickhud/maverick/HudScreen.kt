@@ -27,10 +27,18 @@ import com.eider.karoomaverickhud.extension.Trajectory
  * HUD on a 420×150 Maverick screen. Data lives in the two edge columns (the first and last of
  * a notional four) so the centre stays a clear field of vision, with two or three rows each.
  *
- * Each cell is two stacked lines: the value on top, then its unit/label below — both tinted by
- * the training-zone colour. Everything is positioned by measured text width, since the SDK's
- * [Align] only affects intra-element justification, not the anchor point. Forward/back
- * temple-pad swipes flip pages.
+ * Cell layout depends on how many fields the page packs:
+ *  - ≤4 fields (two roomy rows): the value sits on top with its unit/label stacked just below.
+ *  - 5–6 fields (three rows): the value hugs the column's outer edge and its unit/label (or icon)
+ *    tucks in beside it on the inboard side. Dropping the stacked label line frees the vertical
+ *    room three rows would otherwise need, so the value runs the same large face as the ≤4 pages
+ *    instead of a shrunken one. The inboard offset is the value's measured text width
+ *    ([Text.getMeasuredContentWidth], populated on setText) plus [sideGap], so it tucks against
+ *    the digits no matter how wide the number is.
+ *
+ * The value is tinted by its training-zone colour; the unit/icon stays dim grey. The SDK's [Align]
+ * decides which edge of a single line sits at its anchor X, so values right-align to [rightX] on
+ * the right column and left-align to [leftX] on the left. Forward/back temple-pad swipes flip pages.
  */
 class HudScreen : Screen(420f, 150f) {
 
@@ -38,6 +46,13 @@ class HudScreen : Screen(420f, 150f) {
     private val leftX = 8f
     private val rightX = screenW - 8f
     private val iconW = 26f
+
+    // Side-by-side (5–6 field) tuning, in screen px. [sideGap] is the space between the value and
+    // its inboard unit/icon; [sideLabelDy]/[sideIconDy] drop the smaller unit/icon down to sit
+    // against the tall ~42px value face. Tune on-device if the unit crowds the digits or sits high/low.
+    private val sideGap = 6f
+    private val sideLabelDy = 16f
+    private val sideIconDy = 8f
 
     // Centre control-window geometry (a bordered box with time/signal/battery + a brightness slider).
     private val boxX = 50f
@@ -49,33 +64,44 @@ class HudScreen : Screen(420f, 150f) {
     private val ctrlTopY = 44f
     private val sliderY = 94f // baseline for the brightness status line
 
-    /** Per-cell vertical placement and which edge it hugs; X is computed per-frame from text width. */
-    private data class Slot(val isRight: Boolean, val valueY: Float, val labelY: Float, val iconY: Float)
+    /**
+     * Per-cell placement: which edge it hugs, the value's Y, where the unit/label and icon sit, and
+     * whether the label is beside the value ([side]) or stacked beneath it. X is resolved per frame —
+     * from the column edge for the value, and (in side mode) from the value's measured width.
+     */
+    private data class Slot(
+        val isRight: Boolean,
+        val valueY: Float,
+        val labelY: Float,
+        val iconY: Float,
+        val side: Boolean,
+    )
 
     /**
      * Slots ordered by field count. The first four fields always take the four corners; a 5th
-     * and 6th drop into the centre row (left/right).
+     * and 6th drop into the centre row (left/right). ≤4-field pages stack the unit under the value;
+     * 5–6-field pages put it beside the value (see the class doc) and centre the three rows.
      */
     private fun slotsFor(count: Int): Array<Slot> {
-        fun row(isRight: Boolean, valueY: Float, gap: Float) =
-            Slot(isRight, valueY = valueY, labelY = valueY + gap, iconY = valueY + gap - 4f)
         return if (count <= 4) {
             // Big value face (~33px) stacked over a small unit (~18px): two roomy rows. The gap
             // tucks the unit just under the digits; rows sit clear of the 150px top/bottom edges.
-            val gap = 30f
+            fun stack(isRight: Boolean, valueY: Float) =
+                Slot(isRight, valueY = valueY, labelY = valueY + 30f, iconY = valueY + 26f, side = false)
             arrayOf(
-                row(false, 14f, gap), row(true, 14f, gap),    // TL, TR
-                row(false, 88f, gap), row(true, 88f, gap),    // BL, BR
+                stack(false, 14f), stack(true, 14f),    // TL, TR
+                stack(false, 88f), stack(true, 88f),    // BL, BR
             )
         } else {
-            // Larger value face (~31px) over a smaller unit (~13px) for a stronger hierarchy;
-            // three value+unit rows (3 × ~44px) still fit the 150px lens. The gap matches the
-            // value height so the unit tucks just beneath it.
-            val gap = 31f
+            // Side-by-side: the value runs the tall ~42px face and hugs the edge, with the unit/icon
+            // beside it on the inboard side. Without a stacked unit line, three of these taller value
+            // rows still sit evenly down the 150px lens (digits occupy the upper part of each box).
+            fun side(isRight: Boolean, valueY: Float) =
+                Slot(isRight, valueY = valueY, labelY = valueY + sideLabelDy, iconY = valueY + sideIconDy, side = true)
             arrayOf(
-                row(false, 5f, gap), row(true, 5f, gap),      // TL, TR
-                row(false, 101f, gap), row(true, 101f, gap),  // BL, BR
-                row(false, 53f, gap), row(true, 53f, gap),    // ML, MR (centre)
+                side(false, 4f), side(true, 4f),       // TL, TR
+                side(false, 104f), side(true, 104f),   // BL, BR
+                side(false, 54f), side(true, 54f),     // ML, MR (centre)
             )
         }
     }
@@ -90,21 +116,21 @@ class HudScreen : Screen(420f, 150f) {
     private val icons = Array(cellCount) { Image() }
 
     // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
-    // assets/fonts. Each occupies its own glasses font slot. Both the value and unit faces step
-    // per layout: the roomy ≤4-field (two-row) pages get a big value + medium unit, while the
-    // denser 5–6 field (three-row) pages push the value larger and the unit smaller for a stronger
-    // hierarchy — value + unit still clear the 150px lens (3 × (31+13)px). The HxW token in each
-    // filename is parsed by the SDK to set the glyph dimensions, so the generated names are verbatim.
+    // assets/fonts. Each occupies its own glasses font slot; the HxW token in each filename is parsed
+    // by the SDK to set the glyph dimensions, so the generated names are verbatim. ≤4-field pages stack
+    // the big 33×25 value over the 18×12 unit. 5–6-field pages lay the unit/icon *beside* the value
+    // (see [slotsFor]); freeing that vertical room lets them run an even taller 42×31 value face for a
+    // markedly more legible three-row readout. The unit is the 18×12 face on every page. (The old
+    // 31×22 / 13×9 faces are now unused.)
     private val valueFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s1)
-    private val valueFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.31x22.2bpp.sifz", Font.Slot.s2)
+    private val valueFontTall = Font("fonts/RobotoCondensed-SemiBold.ttf.42x31.2bpp.sifz", Font.Slot.s2)
     private val unitFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
-    private val unitFontDense = Font("fonts/RobotoCondensed-SemiBold.ttf.13x9.2bpp.sifz", Font.Slot.s4)
 
-    /** Big value face on the roomy ≤4-field (two-row) pages; the larger dense face on 5–6 field pages. */
-    private fun valueFontFor(count: Int): Font = if (count <= 4) valueFontBig else valueFontDense
+    /** Value face: the big 33×25 face on ≤4-field pages; the tall 42×31 face on the side-by-side 5–6 pages. */
+    private fun valueFontFor(count: Int): Font = if (count <= 4) valueFontBig else valueFontTall
 
-    /** Medium unit on ≤4-field pages; the smaller dense unit on the tighter 5–6 field pages. */
-    private fun unitFontFor(count: Int): Font = if (count <= 4) unitFontBig else unitFontDense
+    /** Unit face — the 18×12 face on every count. */
+    private fun unitFontFor(@Suppress("UNUSED_PARAMETER") count: Int): Font = unitFontBig
     private val statusText = Text() // centred "waiting for ride" when idle
     private val pauseDot = Text()
     private val clockText = Text() // time of day (shown inside the control window)
@@ -481,7 +507,11 @@ class HudScreen : Screen(420f, 150f) {
         }
     }
 
-    /** Render one cell: value on top, then either the unit/label text or — when icons are on — its icon. */
+    /**
+     * Render one cell: the value, then either the unit/label text or — when icons are on — its icon.
+     * On ≤4-field pages the label/icon stacks under the value; on 5–6-field pages ([Slot.side]) it
+     * sits beside the value, offset by the value's measured width so it tucks against the digits.
+     */
     private fun layoutCell(i: Int, slot: Slot, cell: HudCell?, showIcons: Boolean) {
         val color = colorRgba(cell?.color ?: HudColor.WHITE)
         val align = if (slot.isRight) Align.right else Align.left
@@ -492,12 +522,33 @@ class HudScreen : Screen(420f, 150f) {
 
         // With icons on, the icon stands in for the label entirely; cells without an icon still
         // fall back to the text so the field never goes unlabeled. The colored value carries the
-        // zone signal; the label/icon stays white so it recedes behind the value (a second
+        // zone signal; the label/icon stays dim grey so it recedes behind the value (a second
         // hierarchy cue beyond size) — fewer colored elements per page reads cleaner on the LCOS.
         val icon = cell?.icon
         val labelText = if (showIcons && icon != null) "" else cell?.units.orEmpty()
         units[i].setText(labelText).setForegroundColor(LABEL_RGBA)
-        units[i].setTextAlign(align).setXY(anchorX, slot.labelY)
+        units[i].setTextAlign(align)
+
+        // Where the unit/icon hugs. Stacked pages anchor it at the column edge, under the value;
+        // side pages push it past the value by the value's measured width + a gap, so it tucks
+        // inboard against the digits however wide the number is. setText (above) already refreshed
+        // the value's cachedMeasuredWidth, so getMeasuredContentWidth is current this frame.
+        val labelAnchorX: Float
+        val iconX: Float
+        if (slot.side) {
+            val valueW = values[i].getMeasuredContentWidth()
+            if (slot.isRight) {
+                labelAnchorX = rightX - valueW - sideGap  // label right-aligns here, grows inboard
+                iconX = labelAnchorX - iconW
+            } else {
+                labelAnchorX = leftX + valueW + sideGap   // label left-aligns here, grows inboard
+                iconX = labelAnchorX
+            }
+        } else {
+            labelAnchorX = anchorX
+            iconX = if (slot.isRight) rightX - iconW else leftX
+        }
+        units[i].setXY(labelAnchorX, slot.labelY)
 
         if (!showIcons || icon == null) {
             icons[i].setVisibility(false)
@@ -507,8 +558,6 @@ class HudScreen : Screen(420f, 150f) {
                 icons[i].setResource(imgSrcFor(icon))
                 currentIcon[i] = icon
             }
-            // Icon takes the label's place, so anchor it exactly where the label would have sat.
-            val iconX = if (slot.isRight) rightX - iconW else leftX
             icons[i].setForegroundColor(LABEL_RGBA).setXY(iconX, slot.iconY).setVisibility(true)
         }
     }
