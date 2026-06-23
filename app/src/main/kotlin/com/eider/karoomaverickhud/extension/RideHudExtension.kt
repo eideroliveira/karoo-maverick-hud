@@ -11,11 +11,11 @@ import com.eider.karoomaverickhud.maverick.SaverTuning
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.PageMode
+import com.eider.karoomaverickhud.settings.raceBasePages
 import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
 import io.hammerhead.karooext.internal.Emitter
-import io.hammerhead.karooext.models.ActiveRidePage
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
@@ -153,10 +153,6 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val configFlow = HudPreferences.flow(applicationContext)
             .stateIn(scope, SharingStarted.Eagerly, HudConfig.DEFAULT)
 
-        // Only consumed in FOLLOW_KAROO mode, but shared cheaply via stateIn.
-        val activePageFlow = karoo.consumerFlow<ActiveRidePage>()
-            .stateIn(scope, SharingStarted.Eagerly, null)
-
         // Whether a structured workout is loaded — WORKOUT_STEP_COUNT only streams non-zero while
         // a workout file is present. Gates the (user-editable) workout page below.
         val workoutActiveFlow = karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT)
@@ -284,18 +280,18 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         // summit, …) so the generic renderer can unit-label them. Discovered once at start.
         val extLabels = KarooDataTypeCatalog.labels(applicationContext)
 
-        // The fields to render, as pages of data-type ids, capped to the cells the chosen row
-        // count exposes. FOLLOW_KAROO mirrors the active Karoo page's top fields; AUTO/MANUAL
-        // use the user's custom pages. A live workout prepends the configured workout page; a live
-        // Strava segment, an on-climb, or an approaching climb (radar) prepends its page and pins
-        // the display to it. Precedence when several apply: segment > on-climb > radar.
+        // The fields to render, as pages of data-type ids, capped to the cells the chosen row count
+        // exposes. Race mode cycles only the race-flagged pages; otherwise the user's custom pages.
+        // A live workout prepends the configured workout page; a live Strava segment, an on-climb, or
+        // an approaching climb (radar) prepends its page and pins the display to it. Precedence when
+        // several apply: segment > on-climb > radar.
         val layoutFlow = combine(
-            configFlow, activePageFlow, workoutActiveFlow, autoPagesFlow,
-        ) { cfg, active, workoutActive, auto ->
+            configFlow, workoutActiveFlow, autoPagesFlow,
+        ) { cfg, workoutActive, auto ->
             val cap = cellsForRows(cfg.rows)
-            val base = if (cfg.pageMode == PageMode.FOLLOW_KAROO) {
-                val fields = active?.page?.elements?.asSequence()?.map { it.dataTypeId }?.take(cap)?.toList().orEmpty()
-                if (fields.isEmpty()) emptyList() else listOf(fields)
+            val base = if (cfg.raceMode) {
+                // Race mode: only the race-flagged pages cycle (the dynamic auto-pages still pin on top).
+                raceBasePages(cfg.pages, cfg.racePages, cap)
             } else {
                 cfg.pages.asSequence().map { it.take(cap) }.filter { it.isNotEmpty() }.toList()
             }
