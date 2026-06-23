@@ -89,6 +89,10 @@ class MaverickBridge(
     @Volatile private var pageIndex: Int = 0
     @Volatile private var lastSnapshot: HudSnapshot = HudSnapshot.empty
 
+    // Trajectory-map zoom: index into [TRAJ_ZOOM_LEVELS_M], cycled by a temple-pad tap while the
+    // map is shown. Starts on the middle (200 m) look-ahead.
+    @Volatile private var trajZoomIndex: Int = 1
+
     // The pinned-page index from the last snapshot, so we snap to a segment/climb page only on the
     // rising edge (and when the pin changes) rather than yanking back every tick — the rider can
     // still flip away mid-segment. Null means nothing is pinned.
@@ -123,6 +127,13 @@ class MaverickBridge(
     private var ctrlBrightness = 50
     private var ctrlAuto = false
     @Volatile private var ctrlSignal = 0
+
+    // Which control item the temple pad acts on while the window is open (0=Brightness, 1=Auto,
+    // 2=Radar, 3=Trajectory), cycled by long-tap. Radar/Trajectory mirror the saved config so the
+    // window shows their state; the toggles persist to HudPreferences.
+    private var ctrlFocus = 0
+    private var ctrlRadar = false
+    private var ctrlTraj = false
 
     // Battery-saver bookkeeping. [saverEngaged] tracks the last applied saver state so brightness is
     // only forced on the rising edge (rider temple-pad overrides then stick); the pre-saver brightness
@@ -361,19 +372,20 @@ class MaverickBridge(
     /**
      * Temple-pad gestures.
      *  - Closed: long-tap opens the control window; forward/back flip pages (in any page mode —
-     *    AUTO keeps cycling from wherever they land). A bare tap is swallowed so accidental
-     *    pad touches don't bring up the window mid-ride.
-     *  - Open: backward (read as "swipe down") dismisses; forward = brightness +10;
-     *    tap = brightness −10; long-tap toggles auto-brightness.
+     *    AUTO keeps cycling from wherever they land). A bare tap cycles the zoom while the
+     *    trajectory map is showing, and is otherwise swallowed so accidental pad touches don't
+     *    bring up the window mid-ride.
+     *  - Open: the window focuses one item at a time (Brightness → Auto → Radar → Trajectory);
+     *    long-tap cycles the focus, forward = more/on, tap = less/off, backward dismisses.
      */
     private fun handleTouch(direction: TouchDirection) {
-        Timber.d("touch=$direction controlOpen=$controlOpen bright=$ctrlBrightness auto=$ctrlAuto")
+        Timber.d("touch=$direction controlOpen=$controlOpen focus=$ctrlFocus bright=$ctrlBrightness auto=$ctrlAuto")
         if (controlOpen) {
             when (direction) {
                 TouchDirection.backward -> toggleControl()
-                TouchDirection.forward -> adjustBrightness(+10)
-                TouchDirection.tap -> adjustBrightness(-10)
-                TouchDirection.longTap -> toggleAuto()
+                TouchDirection.longTap -> cycleControlFocus()
+                TouchDirection.forward -> applyControlFocus(increase = true)
+                TouchDirection.tap -> applyControlFocus(increase = false)
                 else -> {}
             }
             return
@@ -382,8 +394,25 @@ class MaverickBridge(
             TouchDirection.longTap -> toggleControl()
             TouchDirection.forward -> changePage(+1)
             TouchDirection.backward -> changePage(-1)
+            TouchDirection.tap -> if (onTrajectoryPage()) cycleTrajectoryZoom()
             else -> {}
         }
+    }
+
+    /** Whether the currently shown page is the trajectory map (so a tap means "change zoom"). */
+    private fun onTrajectoryPage(): Boolean {
+        val idx = lastSnapshot.trajectoryPageIndex ?: return false
+        return pageIndex == idx
+    }
+
+    /**
+     * Step the trajectory zoom to the next look-ahead distance. The screen reads the zoom live and
+     * re-renders on the next frame (the zoom is folded into its change signature), so no re-publish
+     * is needed.
+     */
+    private fun cycleTrajectoryZoom() {
+        trajZoomIndex = (trajZoomIndex + 1) % TRAJ_ZOOM_LEVELS_M.size
+        hudScreen.setTrajectoryZoom(TRAJ_ZOOM_LEVELS_M[trajZoomIndex])
     }
 
     private fun changePage(delta: Int) {
@@ -396,6 +425,10 @@ class MaverickBridge(
     private fun toggleControl() {
         controlOpen = !controlOpen
         if (controlOpen) {
+            ctrlFocus = 0
+            // Mirror the saved route-feature state so the window shows the right ON/OFF.
+            ctrlRadar = configState.value.radarEnabled
+            ctrlTraj = configState.value.trajectoryEnabled
             runCatching {
                 ctrlBrightness = Evs.instance().display().getBrightness().toInt()
                 ctrlAuto = Evs.instance().display().autoBrightness().isEnabled()
@@ -422,18 +455,46 @@ class MaverickBridge(
         pushControl()
     }
 
-    private fun toggleAuto() {
-        ctrlAuto = !ctrlAuto
+    private fun setAuto(enabled: Boolean) {
+        ctrlAuto = enabled
         runCatching {
             Evs.instance().display().autoBrightness().enable(ctrlAuto)
             Timber.d("autoBrightness.enable($ctrlAuto) → readback=${runCatching { Evs.instance().display().autoBrightness().isEnabled() }.getOrNull()}")
-        }.onFailure { Timber.w(it, "toggle auto-brightness") }
+        }.onFailure { Timber.w(it, "set auto-brightness") }
         GlassesLinkState.autoBrightness.value = ctrlAuto
         pushControl()
     }
 
+    /** Long-tap steps the control window's focus through Brightness → Auto → Radar → Trajectory. */
+    private fun cycleControlFocus() {
+        ctrlFocus = (ctrlFocus + 1) % CONTROL_ITEMS
+        pushControl()
+    }
+
+    /** Forward (increase=true) / tap (increase=false) acts on the focused control item. */
+    private fun applyControlFocus(increase: Boolean) {
+        when (ctrlFocus) {
+            1 -> setAuto(increase)
+            2 -> setRadarFeature(increase)
+            3 -> setTrajFeature(increase)
+            else -> adjustBrightness(if (increase) +10 else -10)
+        }
+    }
+
+    private fun setRadarFeature(enabled: Boolean) {
+        ctrlRadar = enabled
+        scope.launch { HudPreferences.setRadarEnabled(appContext, enabled) }
+        pushControl()
+    }
+
+    private fun setTrajFeature(enabled: Boolean) {
+        ctrlTraj = enabled
+        scope.launch { HudPreferences.setTrajectoryEnabled(appContext, enabled) }
+        pushControl()
+    }
+
     private fun pushControl() {
-        hudScreen.setControl(controlOpen, ctrlBrightness, ctrlAuto, ctrlSignal)
+        hudScreen.setControl(controlOpen, ctrlBrightness, ctrlAuto, ctrlSignal, ctrlFocus, ctrlRadar, ctrlTraj)
     }
 
     private fun rssiToBars(rssi: Int): Int = when {
@@ -656,6 +717,12 @@ class MaverickBridge(
     }
 
     companion object {
+        /** Trajectory-map zoom steps (metres of road ahead shown), cycled by a temple-pad tap. */
+        private val TRAJ_ZOOM_LEVELS_M = floatArrayOf(100f, 200f, 400f)
+
+        /** Focusable items in the in-ride control window: Brightness, Auto, Radar, Trajectory. */
+        private const val CONTROL_ITEMS = 4
+
         /** How long to fast-retry a connect before backing off to the slow idle cadence. */
         private const val CONNECT_WINDOW_MS = 3 * 60_000L
         /** Snappy cadence while the control window is open (live brightness/signal feedback). */

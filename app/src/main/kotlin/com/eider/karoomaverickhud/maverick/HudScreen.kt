@@ -10,6 +10,8 @@ import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
 import UIKit.app.resources.ImgSrc
 import UIKit.widgets.Image
+import UIKit.widgets.Polygon
+import UIKit.widgets.Polyline
 import UIKit.widgets.Rect
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
@@ -19,6 +21,7 @@ import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
+import com.eider.karoomaverickhud.extension.Trajectory
 
 /**
  * HUD on a 420×150 Maverick screen. Data lives in the two edge columns (the first and last of
@@ -123,7 +126,17 @@ class HudScreen : Screen(420f, 150f) {
     // Centre control-window widgets.
     private val ctrlBox = Rect()
     private val sigBars = Array(3) { Rect() }
-    private val brightText = Text() // "AUTO BRIGHTNESS" or "BRIGHTNESS  60%"
+    private val brightText = Text() // focused control item, e.g. "BRIGHTNESS  60%" / "RADAR  ON"
+    private val ctrlHint = Text() // "hold: next  ·  swipe/tap: change" — how to drive the control window
+
+    // Trajectory map (shown on descents / when paged to): the heading-up route polyline, a small
+    // "you" marker at the bottom, and corner readouts for speed, grade and the current zoom.
+    private val trajLine = Polyline()
+    private val trajMarker = Polygon()
+    private val trajSpeed = Text()
+    private val trajGrade = Text()
+    private val trajZoom = Text()
+    private var trajMaxPoints = 0 // the Polyline's point cap, read once on first render
 
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
@@ -142,16 +155,37 @@ class HudScreen : Screen(420f, 150f) {
     @Volatile private var ctrlAuto = false
     @Volatile private var ctrlSignal = 0
 
+    // Which control item the temple pad is acting on (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory),
+    // and the two route-feature states, so the window can show the focused item and its value.
+    @Volatile private var ctrlFocus = 0
+    @Volatile private var ctrlRadar = false
+    @Volatile private var ctrlTraj = false
+
+    // Trajectory zoom: metres of road ahead that fill the screen. Cycled by temple-pad taps via
+    // [setTrajectoryZoom] while the trajectory page is shown.
+    @Volatile private var trajLookaheadM = 200f
+
     fun apply(next: HudSnapshot) {
         snapshot = next
     }
 
-    /** Push control-window state (open + brightness 0..100 + auto + signal bars 0..3). */
-    fun setControl(open: Boolean, brightness: Int, auto: Boolean, signal: Int) {
+    /**
+     * Push control-window state: open + brightness 0..100 + auto + signal bars 0..3, plus the
+     * focused item (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory) and the two route-feature states.
+     */
+    fun setControl(open: Boolean, brightness: Int, auto: Boolean, signal: Int, focus: Int, radarOn: Boolean, trajOn: Boolean) {
         controlOpen = open
         ctrlBrightness = brightness
         ctrlAuto = auto
         ctrlSignal = signal
+        ctrlFocus = focus
+        ctrlRadar = radarOn
+        ctrlTraj = trajOn
+    }
+
+    /** Set how many metres of road ahead the trajectory map shows (zoom), cycled by temple-pad taps. */
+    fun setTrajectoryZoom(lookaheadMeters: Float) {
+        trajLookaheadM = lookaheadMeters
     }
 
     private fun UIElement.addTo(screen: Screen): UIElement = also { screen.add(it) }
@@ -236,6 +270,39 @@ class HudScreen : Screen(420f, 150f) {
             .addTo(this)
 
         setupControlWindow()
+        setupTrajectory()
+    }
+
+    /** Create the trajectory map's polyline, "you" marker and corner readouts (all hidden). */
+    private fun setupTrajectory() {
+        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(2).setVisibility(false)
+        add(trajLine)
+        trajMarker.setForegroundColor(EvsColor.White.rgba).setPenThickness(2).setVisibility(false)
+        add(trajMarker)
+        trajSpeed
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(leftX, 6f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        trajGrade
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.right)
+            .setXY(rightX, 6f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        trajZoom
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(leftX, 120f)
+            .setForegroundColor(LABEL_RGBA)
+            .setVisibility(false)
+            .addTo(this)
     }
 
     /** Build the centre control window's box, signal bars and brightness slider (all hidden). */
@@ -264,6 +331,15 @@ class HudScreen : Screen(420f, 150f) {
             .setTextAlign(Align.center)
             .setXY(boxX + boxW / 2f, sliderY - 6f)
             .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+
+        ctrlHint
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(boxX + boxW / 2f, sliderY + 10f)
+            .setForegroundColor(LABEL_RGBA)
             .setVisibility(false)
             .addTo(this)
     }
@@ -298,6 +374,7 @@ class HudScreen : Screen(420f, 150f) {
         // behind it instead, leaving only the window legible.
         if (controlOpen) {
             for (i in 0 until cellCount) blankCell(i)
+            hideTrajectory()
             statusText.setText("")
             pauseDot.setText("")
             ecoText.setVisibility(false)
@@ -311,12 +388,23 @@ class HudScreen : Screen(420f, 150f) {
         // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
         if (!snap.recording && !snap.paused) {
             for (i in 0 until cellCount) blankCell(i)
+            hideTrajectory()
             statusText.setText("WAITING FOR RIDE")
             pauseDot.setText("KAROO CONNECTED")
             return
         }
 
         statusText.setText("")
+
+        // Trajectory map page: draw the heading-up route polyline instead of data cells.
+        if (snap.pageIndex == snap.trajectoryPageIndex && snap.trajectory != null) {
+            for (i in 0 until cellCount) blankCell(i)
+            renderTrajectory(snap.trajectory!!)
+            pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
+            return
+        }
+        hideTrajectory()
+
         val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
         val count = page.size.coerceIn(1, cellCount)
         if (count != layoutCount) applyCount(count)
@@ -324,6 +412,54 @@ class HudScreen : Screen(420f, 150f) {
             if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
+    }
+
+    /**
+     * Draw the heading-up trajectory: the rider sits at bottom-centre looking up, so +forward maps
+     * upward and +right rightward. Metres are scaled to pixels so [trajLookaheadM] of road fills the
+     * vertical span; points beyond the zoom window (or the widget's point cap) are dropped.
+     */
+    private fun renderTrajectory(traj: Trajectory) {
+        if (trajMaxPoints == 0) trajMaxPoints = trajLine.getMaxPoints().coerceAtLeast(2)
+        val ppm = TRAJ_SPAN_PX / trajLookaheadM
+        val cx = screenW / 2f
+
+        trajLine.clear()
+        var added = 0
+        for (p in traj.points) {
+            if (p.forwardM > trajLookaheadM) break // past the visible window (points run forward)
+            if (added >= trajMaxPoints) break
+            trajLine.add(cx + p.rightM * ppm, TRAJ_BOTTOM_Y - p.forwardM * ppm)
+            added++
+        }
+        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(2).setVisibility(added >= 2)
+
+        // "You" — a small upward triangle at the bottom-centre origin.
+        trajMarker.clear()
+        trajMarker.addPoint(cx - 5f, TRAJ_BOTTOM_Y)
+            .addPoint(cx + 5f, TRAJ_BOTTOM_Y)
+            .addPoint(cx, TRAJ_BOTTOM_Y - 11f)
+        trajMarker.setForegroundColor(EvsColor.White.rgba).setPenThickness(2).setVisibility(true)
+
+        // Corner readouts: speed (left), grade (right, tinted), zoom (bottom-left).
+        val speed = traj.overlay.getOrNull(0)
+        val grade = traj.overlay.getOrNull(1)
+        trajSpeed.setText(overlayText(speed)).setForegroundColor(EvsColor.White.rgba).setVisibility(true)
+        trajGrade.setText(overlayText(grade)).setForegroundColor(colorRgba(grade?.color ?: HudColor.WHITE)).setVisibility(true)
+        trajZoom.setText("${trajLookaheadM.toInt()} m").setVisibility(true)
+    }
+
+    /** Combine a readout cell's value and unit into one short string, e.g. "32.5 km/h". */
+    private fun overlayText(cell: HudCell?): String =
+        if (cell == null) "" else "${cell.value} ${cell.units}".trim()
+
+    /** Hide every trajectory-map element (when not on the trajectory page). */
+    private fun hideTrajectory() {
+        trajLine.setVisibility(false)
+        trajMarker.setVisibility(false)
+        trajSpeed.setVisibility(false)
+        trajGrade.setVisibility(false)
+        trajZoom.setVisibility(false)
     }
 
     /**
@@ -400,27 +536,45 @@ class HudScreen : Screen(420f, 150f) {
         val bars = ctrlSignal.coerceIn(0, 3)
         for (i in sigBars.indices) sigBars[i].setVisibility(i < bars)
 
-        if (ctrlAuto) {
-            brightText.setText("AUTO BRIGHTNESS").setForegroundColor(EvsColor.Yellow.rgba)
-        } else {
-            brightText.setText("BRIGHTNESS  ${ctrlBrightness.coerceIn(0, 100)}%").setForegroundColor(EvsColor.White.rgba)
+        // The focused control item and its value; temple-pad long-tap cycles which item this is.
+        val (line, color) = when (ctrlFocus) {
+            1 -> "AUTO BRIGHT  ${onOff(ctrlAuto)}" to (if (ctrlAuto) EvsColor.Yellow.rgba else EvsColor.White.rgba)
+            2 -> "RADAR  ${onOff(ctrlRadar)}" to EvsColor.White.rgba
+            3 -> "TRAJECTORY  ${onOff(ctrlTraj)}" to EvsColor.White.rgba
+            else -> if (ctrlAuto) {
+                "BRIGHTNESS  AUTO" to EvsColor.Yellow.rgba
+            } else {
+                "BRIGHTNESS  ${ctrlBrightness.coerceIn(0, 100)}%" to EvsColor.White.rgba
+            }
         }
+        brightText.setText(line).setForegroundColor(color)
+        ctrlHint.setText("hold: next  ·  swipe/tap: change")
     }
+
+    private fun onOff(on: Boolean): String = if (on) "ON" else "OFF"
 
     private fun setControlVisible(visible: Boolean) {
         ctrlBox.setVisibility(visible)
         clockText.setVisibility(visible)
         batteryText.setVisibility(visible)
         brightText.setVisibility(visible)
+        ctrlHint.setVisibility(visible)
         if (!visible) sigBars.forEach { it.setVisibility(false) }
     }
 
-    /** Folds the control-window state into one int so onUpdateUI can detect a change cheaply. */
+    /**
+     * Folds glasses-side UI state that isn't in the snapshot (control window + trajectory zoom) into
+     * one int, so onUpdateUI re-renders on a change even when the pushed snapshot is unchanged.
+     */
     private fun controlSignature(): Int {
         var h = if (controlOpen) 1 else 0
         h = h * 131 + ctrlBrightness
         h = h * 131 + (if (ctrlAuto) 1 else 0)
         h = h * 131 + ctrlSignal
+        h = h * 131 + trajLookaheadM.toInt()
+        h = h * 131 + ctrlFocus
+        h = h * 131 + (if (ctrlRadar) 1 else 0)
+        h = h * 131 + (if (ctrlTraj) 1 else 0)
         return h
     }
 
@@ -462,6 +616,12 @@ class HudScreen : Screen(420f, 150f) {
         // KarooTheme so the settings preview reads the same. Bump toward white here if the labels
         // turn out too faint to read on-device.
         private val LABEL_RGBA = EvsColors.fromRgb(0x99, 0xA1, 0xAC)
+
+        // Trajectory map geometry: the rider sits near the bottom looking up; the road ahead fills
+        // the vertical span above. [TRAJ_SPAN_PX] of pixels represents one full zoom look-ahead.
+        private const val TRAJ_BOTTOM_Y = 134f
+        private const val TRAJ_TOP_Y = 16f
+        private const val TRAJ_SPAN_PX = TRAJ_BOTTOM_Y - TRAJ_TOP_Y
     }
 
     override fun onTouch(touch: TouchDirection) {
