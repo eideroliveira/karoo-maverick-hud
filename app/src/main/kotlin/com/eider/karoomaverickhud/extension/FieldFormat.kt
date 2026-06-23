@@ -287,11 +287,31 @@ data class HudSnapshot(
     val showIcons: Boolean = false,
     /** Whether battery-saver ("ECO") is engaged — drives the top-left ECO badge on the glasses. */
     val eco: Boolean = false,
+    /**
+     * Heading-up route trajectory to draw when the trajectory map page is shown (chiefly on
+     * descents, to read curves ahead). Null when there's no route/position to project.
+     */
+    val trajectory: Trajectory? = null,
+    /**
+     * Index in [pages] of the trajectory map page. When [pageIndex] equals it (and [trajectory] is
+     * present) the glasses draw the polyline map instead of data cells. Null = no trajectory page.
+     */
+    val trajectoryPageIndex: Int? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
     }
 }
+
+/**
+ * A heading-up route preview for the glasses: the upcoming path in a metre frame ([points], rider
+ * at (0,0) looking up) plus a small corner [overlay] (speed + grade) so the map isn't only a line.
+ * The renderer scales [points] to pixels by the current zoom.
+ */
+data class Trajectory(
+    val points: List<MetersPoint>,
+    val overlay: List<HudCell>,
+)
 
 object FieldFormat {
 
@@ -378,6 +398,12 @@ object FieldFormat {
         return toTop > 0.0 || elevToTop > 0.0
     }
 
+    /** Live grade (%) from the [DataType.Type.ELEVATION_GRADE] stream; null when not streaming. */
+    fun gradeOf(state: StreamState): Double? {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return null
+        return dp.values[DataType.Field.ELEVATION_GRADE] ?: dp.singleValue
+    }
+
     private fun targetOf(state: StreamState): WorkoutTarget {
         val dp = (state as? StreamState.Streaming)?.dataPoint ?: return WorkoutTarget(null, null, null)
         return WorkoutTarget(
@@ -411,6 +437,50 @@ object FieldFormat {
             }
             else -> HudColor.WHITE
         }
+    }
+
+    /**
+     * Synthetic cells for the next-climb radar page, rendered from the computed [NextClimb] rather
+     * than a Karoo stream (the extension injects this map into the cell lookup and keeps these ids
+     * out of subscription). Distances honour the imperial setting; grade is coloured by severity as
+     * a "how much will this hurt" preview. Returns dashes when no climb is in range so a pinned page
+     * still draws.
+     */
+    fun radarCells(climb: NextClimb?, imperial: Boolean): Map<String, HudCell> = mapOf(
+        RouteRadar.FIELD_DISTANCE to HudCell(
+            formatDistance(climb?.distanceToStart, imperial),
+            if (imperial) "mi" else "km",
+            HudColor.CYAN,
+            HudIcon.DISTANCE,
+        ),
+        RouteRadar.FIELD_ETA to HudCell(
+            // formatDuration expects milliseconds (see its note); ETA is seconds.
+            formatDuration(climb?.etaSeconds?.let { it * 1000.0 }),
+            "eta",
+            HudColor.WHITE,
+            HudIcon.TIME,
+        ),
+        RouteRadar.FIELD_GRADE to HudCell(
+            climb?.grade?.let { "%.0f".format(it) } ?: "--",
+            "%",
+            gradeColor(climb?.grade),
+            null,
+        ),
+        RouteRadar.FIELD_LENGTH to HudCell(
+            formatDistance(climb?.length, imperial),
+            "long",
+            HudColor.WHITE,
+            null,
+        ),
+    )
+
+    /** Climb-gradient severity colour for the radar grade preview (green easy → red brutal). */
+    private fun gradeColor(grade: Double?): HudColor = when {
+        grade == null -> HudColor.WHITE
+        grade < 4.0 -> HudColor.GREEN
+        grade < 7.0 -> HudColor.YELLOW
+        grade < 10.0 -> HudColor.ORANGE
+        else -> HudColor.RED
     }
 
     /**

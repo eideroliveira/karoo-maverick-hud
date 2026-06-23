@@ -13,6 +13,7 @@ import com.eider.karoomaverickhud.extension.DEFAULT_HR_ZONES
 import com.eider.karoomaverickhud.extension.DEFAULT_POWER_ZONES
 import com.eider.karoomaverickhud.extension.MAX_ROWS
 import com.eider.karoomaverickhud.extension.MIN_ROWS
+import com.eider.karoomaverickhud.extension.RouteRadar
 import com.eider.karoomaverickhud.extension.ZoneBand
 import io.hammerhead.karooext.models.DataType
 import kotlinx.coroutines.flow.Flow
@@ -89,6 +90,18 @@ data class HudConfig(
     val saverEnabled: Boolean,
     /** Glasses battery % at or below which saver auto-engages (shown as "ECO (auto)"). */
     val saverThresholdPct: Int,
+    /**
+     * Whether the next-climb radar look-ahead is active. When on (and a route with climbs is
+     * loaded), the HUD pins a brief preview page — distance/ETA/grade/length — as the rider nears a
+     * climb, then hands off to the on-climb page at the ramp. See [RouteRadar].
+     */
+    val radarEnabled: Boolean,
+    /**
+     * Whether the route trajectory map is active. When on (and a route is loaded), the glasses draw
+     * a heading-up preview of the road ahead — auto-pinned on descents to read curves early, and
+     * also reachable as a normal page. See [RouteTrajectory].
+     */
+    val trajectoryEnabled: Boolean,
 ) {
     companion object {
         /** Seeded layout matching the original hard-coded two-page HUD. */
@@ -140,6 +153,23 @@ data class HudConfig(
             DataType.Type.ELEVATION_TO_TOP,
         )
 
+        /**
+         * Seeded next-climb radar page, shown and pinned as the rider approaches a climb on a loaded
+         * route (gated on [HudConfig.radarEnabled]). Live power/cadence stay real Karoo streams (so
+         * they keep zone colouring); distance/grade/eta/length are synthetic [RouteRadar] fields.
+         * Slot order TL-TR-BL-BR-ML-MR (lens columns draw 0-4-2 / 1-5-3): left = power, eta, cadence;
+         * right = distance-to-climb, length, grade. The 4-cell (2-row) layout keeps the corners —
+         * power, distance, cadence, grade — and drops eta & length.
+         */
+        val DEFAULT_RADAR_PAGE: List<String> = listOf(
+            DataType.Type.POWER,
+            RouteRadar.FIELD_DISTANCE,
+            DataType.Type.CADENCE,
+            RouteRadar.FIELD_GRADE,
+            RouteRadar.FIELD_ETA,
+            RouteRadar.FIELD_LENGTH,
+        )
+
         val DEFAULT = HudConfig(
             maverickDeviceId = null,
             maverickDeviceName = null,
@@ -162,6 +192,8 @@ data class HudConfig(
             showIcons = false,
             saverEnabled = false,
             saverThresholdPct = com.eider.karoomaverickhud.maverick.SaverTuning.DEFAULT_THRESHOLD_PCT,
+            radarEnabled = true,
+            trajectoryEnabled = true,
         )
     }
 }
@@ -190,6 +222,8 @@ object HudPreferences {
     private val KEY_SHOW_ICONS = booleanPreferencesKey("show_icons")
     private val KEY_SAVER_ENABLED = booleanPreferencesKey("saver_enabled")
     private val KEY_SAVER_THRESHOLD = intPreferencesKey("saver_threshold_pct")
+    private val KEY_RADAR_ENABLED = booleanPreferencesKey("radar_enabled")
+    private val KEY_TRAJECTORY_ENABLED = booleanPreferencesKey("trajectory_enabled")
 
     fun flow(context: Context): Flow<HudConfig> = context.dataStore.data.map { prefs ->
         HudConfig(
@@ -219,6 +253,8 @@ object HudPreferences {
             showIcons = prefs[KEY_SHOW_ICONS] ?: HudConfig.DEFAULT.showIcons,
             saverEnabled = prefs[KEY_SAVER_ENABLED] ?: HudConfig.DEFAULT.saverEnabled,
             saverThresholdPct = (prefs[KEY_SAVER_THRESHOLD] ?: HudConfig.DEFAULT.saverThresholdPct).coerceIn(0, 100),
+            radarEnabled = prefs[KEY_RADAR_ENABLED] ?: HudConfig.DEFAULT.radarEnabled,
+            trajectoryEnabled = prefs[KEY_TRAJECTORY_ENABLED] ?: HudConfig.DEFAULT.trajectoryEnabled,
         )
     }
 
@@ -272,6 +308,14 @@ object HudPreferences {
 
     suspend fun setSaverThreshold(context: Context, pct: Int) {
         context.dataStore.edit { it[KEY_SAVER_THRESHOLD] = pct.coerceIn(0, 100) }
+    }
+
+    suspend fun setRadarEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { it[KEY_RADAR_ENABLED] = enabled }
+    }
+
+    suspend fun setTrajectoryEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { it[KEY_TRAJECTORY_ENABLED] = enabled }
     }
 
     suspend fun setAutoCycleMs(context: Context, ms: Long) {

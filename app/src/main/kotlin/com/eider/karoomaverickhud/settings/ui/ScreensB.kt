@@ -200,6 +200,30 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 }
             }
 
+            // Route-aware auto-pages — not field-editable (the radar is a fixed layout; the
+            // trajectory is a drawn map), so they're on/off switches rather than editable tabs.
+            // Each appears automatically when its trigger is live (approaching a climb / descending),
+            // and the trajectory is also reachable by paging.
+            KSectionLabel("Route auto-pages")
+            CardBlock {
+                KRow {
+                    KIconChip("distance")
+                    Column(Modifier.weight(1f)) {
+                        KText("Next-climb radar", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                        KText("Previews the climb ahead — distance, ETA, grade — as you near it", color = K.text2, size = 12.5.sp)
+                    }
+                    KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
+                }
+                KRow(last = true) {
+                    KIconChip("arrows")
+                    Column(Modifier.weight(1f)) {
+                        KText("Trajectory map", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                        KText("Heading-up map of the road ahead — auto-shows on descents", color = K.text2, size = 12.5.sp)
+                    }
+                    KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
+                }
+            }
+
             KText("The centre of the lens stays clear for the road. Fields fill the edges from the corners in.",
                 color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 30.dp))
         }
@@ -464,6 +488,26 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                     KText("Locked to the Karoo's 1 Hz sensor cadence", color = K.text2, size = 12.5.sp)
                 }
                 KText("1 Hz", color = K.text2, size = 17.sp, weight = FontWeight.SemiBold, family = CondFamily)
+            }
+        }
+
+        KSectionLabel("Route")
+        CardBlock {
+            KRow {
+                KIconChip("distance")
+                Column(Modifier.weight(1f)) {
+                    KText("Next-climb radar", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                    KText("Preview the climb ahead — distance, ETA, grade — as you approach it", color = K.text2, size = 12.5.sp)
+                }
+                KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
+            }
+            KRow(last = true) {
+                KIconChip("arrows")
+                Column(Modifier.weight(1f)) {
+                    KText("Trajectory map", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                    KText("Draw the road ahead to read curves — auto-shows on descents", color = K.text2, size = 12.5.sp)
+                }
+                KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
             }
         }
 
