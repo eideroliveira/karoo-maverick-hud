@@ -133,7 +133,6 @@ fun HubScreen(
 
 private fun pageModeLabel(cfg: HudConfig): String = when (cfg.pageMode) {
     com.eider.karoomaverickhud.settings.PageMode.AUTO -> "Auto-cycle"
-    com.eider.karoomaverickhud.settings.PageMode.FOLLOW_KAROO -> "Follow Karoo"
     com.eider.karoomaverickhud.settings.PageMode.MANUAL -> "Manual"
 }
 

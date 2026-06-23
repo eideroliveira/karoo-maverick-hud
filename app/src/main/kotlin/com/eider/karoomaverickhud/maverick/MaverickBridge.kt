@@ -661,7 +661,8 @@ class MaverickBridge(
                 delay(if (Eco.active.value) maxOf(baseCycle, SaverTuning.SAVER_AUTOCYCLE_MS) else baseCycle)
                 if (HudState.previewSnapshot.value != null) continue // preview owns paging
                 if (lastSnapshot.pinnedPage != null) continue // a segment/climb page is pinned
-                if (configState.value.pageMode == PageMode.AUTO) {
+                // Race mode forces auto-cycling regardless of the configured page mode (hands-off).
+                if (configState.value.pageMode == PageMode.AUTO || configState.value.raceMode) {
                     val count = lastSnapshot.pages.size
                     if (count > 1) {
                         pageIndex = (pageIndex + 1) % count

@@ -99,6 +99,13 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
         }
     }
 
+    // Race-mode membership, one flag per numbered page (a missing flag counts as included). Kept
+    // aligned with [pages] as pages are added / removed / reordered below.
+    fun raceFlags(): List<Boolean> = List(pages.size) { cfg.racePages.getOrElse(it) { true } }
+    fun setRaceFlags(next: List<Boolean>) { scope.launch { HudPreferences.setRacePages(ctx, next) } }
+    fun setRacePage(index: Int, on: Boolean) =
+        setRaceFlags(raceFlags().toMutableList().also { if (index in it.indices) it[index] = on })
+
     Box(Modifier.fillMaxSize()) {
         ScreenScroll {
             KSectionLabel("Layout per page")
@@ -116,14 +123,28 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 }
             }
 
+            KSectionLabel("Race mode")
+            CardBlock {
+                KRow(last = true) {
+                    KIconChip("bolt")
+                    Column(Modifier.weight(1f)) {
+                        KText("Race mode", color = K.text, size = 16.sp, weight = FontWeight.Medium)
+                        KText("Cycle only your race pages + the auto-pages, switching hands-free", color = K.text2, size = 12.5.sp)
+                    }
+                    KSwitch(cfg.raceMode) { scope.launch { HudPreferences.setRaceMode(ctx, it) } }
+                }
+            }
+
             KSectionLabel("Pages")
             FlowRow(Modifier.padding(horizontal = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pages.forEachIndexed { i, _ ->
                     val on = i == cur
+                    // Accent outline marks a page that's in race mode (when race mode is on).
+                    val raceOn = cfg.raceMode && cfg.racePages.getOrElse(i) { true }
                     Box(
                         Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
                             .background(if (on) K.accent else K.surface2)
-                            .border(1.dp, if (on) K.accent else K.line2, RoundedCornerShape(10.dp))
+                            .border(1.dp, when { on -> K.accent; raceOn -> K.accent.copy(alpha = 0.5f); else -> K.line2 }, RoundedCornerShape(10.dp))
                             .clickable(remember { MutableInteractionSource() }, null) { active = i }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center,
@@ -135,6 +156,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             .border(1.dp, K.line3, RoundedCornerShape(10.dp))
                             .clickable(remember { MutableInteractionSource() }, null) {
                                 setPages(pages + listOf(listOf(DataType.Type.POWER, DataType.Type.HEART_RATE)))
+                                setRaceFlags(raceFlags() + true)
                                 active = pages.size
                             }
                             .padding(horizontal = 14.dp),
@@ -182,18 +204,31 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 help,
                                 color = K.text3, size = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 14.dp),
                             )
-                        } else Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Reorder this page within the numbered list. These move the page (and
-                            // follow it) — not prev/next navigation; use the numbered tabs above for that.
-                            KButton("Move ←", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur > 0) {
-                                if (cur > 0) { setPages(swap(pages, cur, cur - 1)); active = cur - 1 }
+                        } else Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            // Whether this page is shown while race mode is on.
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    KText("Race page", color = K.text, size = 15.sp, weight = FontWeight.Medium)
+                                    KText("Include this page in race mode's cycle", color = K.text2, size = 12.sp)
+                                }
+                                KSwitch(raceFlags().getOrElse(cur) { true }) { setRacePage(cur, it) }
                             }
-                            KButton("Move →", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur < pages.size - 1) {
-                                if (cur < pages.size - 1) { setPages(swap(pages, cur, cur + 1)); active = cur + 1 }
-                            }
-                            KButton("Remove page", icon = "trash", variant = KBtnVariant.Danger, height = 44.dp, enabled = pages.size > 1,
-                                modifier = Modifier.weight(1f)) {
-                                if (pages.size > 1) { setPages(pages.filterIndexed { i, _ -> i != cur }); active = (cur - 1).coerceAtLeast(0) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Reorder this page within the numbered list. These move the page (and
+                                // follow it) — not prev/next navigation; use the numbered tabs above for that.
+                                KButton("Move ←", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur > 0) {
+                                    if (cur > 0) { setRaceFlags(swap(raceFlags(), cur, cur - 1)); setPages(swap(pages, cur, cur - 1)); active = cur - 1 }
+                                }
+                                KButton("Move →", variant = KBtnVariant.Ghost, height = 44.dp, enabled = cur < pages.size - 1) {
+                                    if (cur < pages.size - 1) { setRaceFlags(swap(raceFlags(), cur, cur + 1)); setPages(swap(pages, cur, cur + 1)); active = cur + 1 }
+                                }
+                                KButton("Remove page", icon = "trash", variant = KBtnVariant.Danger, height = 44.dp, enabled = pages.size > 1,
+                                    modifier = Modifier.weight(1f)) {
+                                    if (pages.size > 1) {
+                                        setRaceFlags(raceFlags().filterIndexed { i, _ -> i != cur })
+                                        setPages(pages.filterIndexed { i, _ -> i != cur }); active = (cur - 1).coerceAtLeast(0)
+                                    }
+                                }
                             }
                         }
                     }
@@ -440,7 +475,6 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
         CardBlock {
             val modes = listOf(
                 Triple(PageMode.AUTO, "Auto-cycle pages", "Rotate pages on a timer"),
-                Triple(PageMode.FOLLOW_KAROO, "Follow Karoo page", "Mirror the page you swipe on the head unit"),
                 Triple(PageMode.MANUAL, "Manual", "Tap the glasses temple pad to switch"),
             )
             modes.forEachIndexed { i, (mode, title, sub) ->

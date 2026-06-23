@@ -22,7 +22,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-enum class PageMode { AUTO, FOLLOW_KAROO, MANUAL }
+enum class PageMode { AUTO, MANUAL }
 
 /**
  * Drivetrain setup for the GEAR field. [source] is "auto" (read live from SRAM AXS / Shimano Di2
@@ -48,7 +48,7 @@ data class HudConfig(
     val autoCycleMs: Long,
     /**
      * Custom glasses pages, each a list of Karoo data-type ids (capped to 2 × [rows] when rendered).
-     * Used by AUTO/MANUAL modes; FOLLOW_KAROO ignores these and mirrors the Karoo page.
+     * The glasses pages to render (race mode shows the race-flagged subset).
      */
     val pages: List<List<String>>,
     /**
@@ -102,6 +102,17 @@ data class HudConfig(
      * also reachable as a normal page. See [RouteTrajectory].
      */
     val trajectoryEnabled: Boolean,
+    /**
+     * Race mode. When on, only the race-flagged numbered pages (see [racePages]) plus the dynamic
+     * auto-pages (workout/segment/climb/radar/trajectory) are shown, and paging auto-cycles
+     * regardless of [pageMode] — a hands-off layout for racing. See [raceBasePages].
+     */
+    val raceMode: Boolean,
+    /**
+     * Per numbered-page "include in race mode" flags, aligned by index with [pages]. A missing entry
+     * counts as included, so by default every page is a race page until you uncheck some.
+     */
+    val racePages: List<Boolean>,
 ) {
     companion object {
         /** Seeded layout matching the original hard-coded two-page HUD. */
@@ -194,8 +205,21 @@ data class HudConfig(
             saverThresholdPct = com.eider.karoomaverickhud.maverick.SaverTuning.DEFAULT_THRESHOLD_PCT,
             radarEnabled = true,
             trajectoryEnabled = true,
+            raceMode = false,
+            racePages = emptyList(),
         )
     }
+}
+
+/**
+ * The base (numbered) pages to cycle in race mode: those flagged in [raceFlags] (a missing flag
+ * counts as included), each capped to [cap] cells and non-empty. Falls back to all pages when
+ * nothing is flagged, so race mode is never blank.
+ */
+fun raceBasePages(pages: List<List<String>>, raceFlags: List<Boolean>, cap: Int): List<List<String>> {
+    val flagged = pages.filterIndexed { i, _ -> raceFlags.getOrElse(i) { true } }
+        .map { it.take(cap) }.filter { it.isNotEmpty() }
+    return flagged.ifEmpty { pages.map { it.take(cap) }.filter { it.isNotEmpty() } }
 }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore("hud_prefs")
@@ -224,6 +248,8 @@ object HudPreferences {
     private val KEY_SAVER_THRESHOLD = intPreferencesKey("saver_threshold_pct")
     private val KEY_RADAR_ENABLED = booleanPreferencesKey("radar_enabled")
     private val KEY_TRAJECTORY_ENABLED = booleanPreferencesKey("trajectory_enabled")
+    private val KEY_RACE_MODE = booleanPreferencesKey("race_mode")
+    private val KEY_RACE_PAGES = stringPreferencesKey("race_pages_json")
 
     fun flow(context: Context): Flow<HudConfig> = context.dataStore.data.map { prefs ->
         HudConfig(
@@ -255,6 +281,8 @@ object HudPreferences {
             saverThresholdPct = (prefs[KEY_SAVER_THRESHOLD] ?: HudConfig.DEFAULT.saverThresholdPct).coerceIn(0, 100),
             radarEnabled = prefs[KEY_RADAR_ENABLED] ?: HudConfig.DEFAULT.radarEnabled,
             trajectoryEnabled = prefs[KEY_TRAJECTORY_ENABLED] ?: HudConfig.DEFAULT.trajectoryEnabled,
+            raceMode = prefs[KEY_RACE_MODE] ?: HudConfig.DEFAULT.raceMode,
+            racePages = prefs[KEY_RACE_PAGES]?.let { decodeBools(it) } ?: HudConfig.DEFAULT.racePages,
         )
     }
 
@@ -318,6 +346,14 @@ object HudPreferences {
         context.dataStore.edit { it[KEY_TRAJECTORY_ENABLED] = enabled }
     }
 
+    suspend fun setRaceMode(context: Context, enabled: Boolean) {
+        context.dataStore.edit { it[KEY_RACE_MODE] = enabled }
+    }
+
+    suspend fun setRacePages(context: Context, flags: List<Boolean>) {
+        context.dataStore.edit { it[KEY_RACE_PAGES] = Json.encodeToString(flags) }
+    }
+
     suspend fun setAutoCycleMs(context: Context, ms: Long) {
         context.dataStore.edit { it[KEY_AUTO_CYCLE_MS] = ms }
     }
@@ -358,6 +394,9 @@ object HudPreferences {
 
     private fun decodeFields(json: String): List<String>? =
         runCatching { Json.decodeFromString<List<String>>(json) }.getOrNull()
+
+    private fun decodeBools(json: String): List<Boolean>? =
+        runCatching { Json.decodeFromString<List<Boolean>>(json) }.getOrNull()
 
     private fun decodeZones(json: String): List<ZoneBand>? =
         runCatching { Json.decodeFromString<List<ZoneBand>>(json) }.getOrNull()
