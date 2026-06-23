@@ -181,11 +181,12 @@ class HudScreen : Screen(420f, 150f) {
     @Volatile private var ctrlAuto = false
     @Volatile private var ctrlSignal = 0
 
-    // Which control item the temple pad is acting on (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory),
-    // and the two route-feature states, so the window can show the focused item and its value.
+    // Which control item the temple pad is acting on (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory,
+    // 4=Race), and the route-feature states, so the window can show the focused item and its value.
     @Volatile private var ctrlFocus = 0
     @Volatile private var ctrlRadar = false
     @Volatile private var ctrlTraj = false
+    @Volatile private var ctrlRace = false
 
     // Trajectory zoom: metres of road ahead that fill the screen. Cycled by temple-pad taps via
     // [setTrajectoryZoom] while the trajectory page is shown.
@@ -197,9 +198,9 @@ class HudScreen : Screen(420f, 150f) {
 
     /**
      * Push control-window state: open + brightness 0..100 + auto + signal bars 0..3, plus the
-     * focused item (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory) and the two route-feature states.
+     * focused item (0=Brightness, 1=Auto, 2=Radar, 3=Trajectory, 4=Race) and the route-feature states.
      */
-    fun setControl(open: Boolean, brightness: Int, auto: Boolean, signal: Int, focus: Int, radarOn: Boolean, trajOn: Boolean) {
+    fun setControl(open: Boolean, brightness: Int, auto: Boolean, signal: Int, focus: Int, radarOn: Boolean, trajOn: Boolean, raceOn: Boolean) {
         controlOpen = open
         ctrlBrightness = brightness
         ctrlAuto = auto
@@ -207,6 +208,7 @@ class HudScreen : Screen(420f, 150f) {
         ctrlFocus = focus
         ctrlRadar = radarOn
         ctrlTraj = trajOn
+        ctrlRace = raceOn
     }
 
     /** Set how many metres of road ahead the trajectory map shows (zoom), cycled by temple-pad taps. */
@@ -590,6 +592,7 @@ class HudScreen : Screen(420f, 150f) {
             1 -> "AUTO BRIGHT  ${onOff(ctrlAuto)}" to (if (ctrlAuto) EvsColor.Yellow.rgba else EvsColor.White.rgba)
             2 -> "RADAR  ${onOff(ctrlRadar)}" to EvsColor.White.rgba
             3 -> "TRAJECTORY  ${onOff(ctrlTraj)}" to EvsColor.White.rgba
+            4 -> "RACE  ${onOff(ctrlRace)}" to (if (ctrlRace) EvsColor.Yellow.rgba else EvsColor.White.rgba)
             else -> if (ctrlAuto) {
                 "BRIGHTNESS  AUTO" to EvsColor.Yellow.rgba
             } else {
@@ -624,6 +627,7 @@ class HudScreen : Screen(420f, 150f) {
         h = h * 131 + ctrlFocus
         h = h * 131 + (if (ctrlRadar) 1 else 0)
         h = h * 131 + (if (ctrlTraj) 1 else 0)
+        h = h * 131 + (if (ctrlRace) 1 else 0)
         return h
     }
 
