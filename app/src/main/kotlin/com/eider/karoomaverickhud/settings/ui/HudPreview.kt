@@ -151,18 +151,26 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val color = cellColor(field, demo, cfg)
     val label = field?.unit?.takeIf { it.isNotEmpty() } ?: field?.label ?: ""
     // Value size mirrors the glasses faces, picked by the rider's HUD font size (33/38/42 px) rather
-    // than the field count. Only the label changes place. Label/icon use dim grey (K.text2) and only
-    // the value takes the zone color, so the preview reads exactly like the glasses.
+    // than the field count. Only the label changes place. Labels render white and only the value
+    // takes the zone color (icons stay dim grey), so the preview reads exactly like the glasses.
     val value: @Composable () -> Unit = {
         KText(demo?.display ?: "--", color = color, size = hudValueSp(cfg.hudFontSize).sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
     }
-    // With icons on, the icon replaces the label outright (only fields with a real glasses icon —
-    // extension fields have none, so they keep their text).
+    // With icons on, the icon replaces the unit, plus a short white differentiator tag for fields
+    // that share an icon (e.g. "to top", "NP") — the original field that owns the icon shows it
+    // alone (only fields with a real glasses icon; extension fields have none, so they keep text).
     val showIcon = cfg.showIcons && FieldFormat.iconFor(fieldId) != null
+    val tag = if (showIcon) FieldFormat.iconTagFor(fieldId) else ""
     val labelOrIcon: @Composable () -> Unit = {
-        if (showIcon) KIcon(field?.icon ?: "bolt", 16.dp, Lens.label, stroke = 2.4f)
-        else KText(label, color = Lens.label, size = 14.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+        if (showIcon) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                KIcon(field?.icon ?: "bolt", 12.dp, Lens.label, stroke = 2.4f)
+                if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 13.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+            }
+        } else {
+            KText(label, color = K.zWhite, size = 14.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+        }
     }
     if (big) {
         // ≤4-field pages: value on top, label/icon stacked just below.
@@ -337,19 +345,27 @@ private fun EditSlot(
         contentAlignment = if (right) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
         if (field != null) {
-            // Value size echoes the glasses faces (27sp ≤4, taller 32sp on the side-by-side 5–6
-            // pages); only its label changes place. With icons on, the icon replaces the label
-            // outright (fields without a real glasses icon keep their text). Label/icon dim grey
-            // (K.text2); value keeps the zone color — same split as the glasses (HudScreen) and
-            // the read-only LensCell preview.
+            // Value size echoes the glasses faces, picked by the rider's HUD font size (a touch
+            // smaller than the read-only lens, since slots are bordered tap targets); only its label
+            // changes place. With icons on, the icon replaces the unit, plus a short white tag for
+            // fields that share an icon (the original owner shows it alone; fields without a real
+            // glasses icon keep their text). Labels render white, the value keeps the zone color —
+            // same split as the glasses (HudScreen) and the LensCell preview.
             val value: @Composable () -> Unit = {
                 KText(demo?.display ?: "--", color = color, size = editValueSp(cfg.hudFontSize).sp,
                     weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
             }
             val showIcon = cfg.showIcons && fieldId?.let { FieldFormat.iconFor(it) } != null
+            val tag = if (showIcon) fieldId?.let { FieldFormat.iconTagFor(it) }.orEmpty() else ""
             val labelOrIcon: @Composable () -> Unit = {
-                if (showIcon) KIcon(field.icon, 10.dp, Lens.label, stroke = 2.4f)
-                else KText(field.unit.ifEmpty { field.label }, color = Lens.label, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+                if (showIcon) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+                        KIcon(field.icon, 8.dp, Lens.label, stroke = 2.4f)
+                        if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 8.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+                    }
+                } else {
+                    KText(field.unit.ifEmpty { field.label }, color = K.zWhite, size = 9.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
+                }
             }
             if (big) {
                 // ≤4-field pages: value on top, label/icon stacked just below.

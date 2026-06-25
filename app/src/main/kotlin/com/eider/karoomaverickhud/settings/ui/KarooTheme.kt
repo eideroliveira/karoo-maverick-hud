@@ -112,7 +112,9 @@ val ICON_PATHS: Map<String, String> = mapOf(
     "speed" to "M3.5 18a9 9 0 1 1 17 0 M12 14.5 16 9 M12 15 m-1.5 0 a1.5 1.5 0 1 0 3 0 a1.5 1.5 0 1 0 -3 0",
     "distance" to "M6 18 m-2.4 0 a2.4 2.4 0 1 0 4.8 0 a2.4 2.4 0 1 0 -4.8 0 M18 6 m-2.4 0 a2.4 2.4 0 1 0 4.8 0 a2.4 2.4 0 1 0 -4.8 0 M8 16.5 16 7.5",
     "time" to "M12 12 m-9 0 a9 9 0 1 0 18 0 a9 9 0 1 0 -18 0 M12 7v5l3.5 2",
-    "balance" to "M3 8h7.5v8H3z M13.5 8H21v8h-7.5z",
+    // L/R balance: two triangles (left & right halves) meeting at the bottom centre, their inner
+    // edges forming a V from the top corners down — mirrors the glasses ic_balance.png glyph.
+    "balance" to "M3 5L12 19L3 19Z M21 5L12 19L21 19Z",
     "gear" to "M12 12 m-3.2 0 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1",
     "grade" to "M3 19 21 5 M3 19h18",
     "ascent" to "m3 18 5-8 4 5 3-4 6 7Z",
