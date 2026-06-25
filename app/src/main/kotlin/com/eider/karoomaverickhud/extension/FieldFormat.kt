@@ -263,6 +263,14 @@ data class HudCell(
 }
 
 /**
+ * Glasses value font size. Picks which pre-generated Roboto Condensed face the HUD value runs:
+ * [SMALL] the 33×25 face, [MEDIUM] the 38×28 face (the default — between the old per-count sizes),
+ * [LARGE] the 42×31 face. The unit face and the stacked/side layout are unaffected; only the value
+ * glyph height changes. See HudScreen.valueFontFor.
+ */
+enum class HudFontSize { SMALL, MEDIUM, LARGE }
+
+/**
  * What the glasses render now: one list of [HudCell] per page, the current page, and ride
  * state (so the screen shows "waiting for ride" when idle and the HUD when recording).
  */
@@ -285,6 +293,8 @@ data class HudSnapshot(
     val battery: Int? = null,
     /** Whether to draw each cell's icon next to its unit/label. */
     val showIcons: Boolean = false,
+    /** Glasses value font size (Small 33 / Medium 38 / Large 42 px face); Medium is the default. */
+    val fontSize: HudFontSize = HudFontSize.MEDIUM,
     /** Whether battery-saver ("ECO") is engaged — drives the top-left ECO badge on the glasses. */
     val eco: Boolean = false,
     /**

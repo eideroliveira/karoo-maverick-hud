@@ -398,6 +398,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     rows = configFlow.value.rows,
                     clock = if (configFlow.value.showClock) currentClock() else "",
                     showIcons = configFlow.value.showIcons,
+                    fontSize = configFlow.value.hudFontSize,
                     // battery (glasses %) is stamped by MaverickBridge, which owns the Evs link.
                     // Trajectory rides along only when its page exists in this layout.
                     trajectory = layout.trajectoryPageIndex?.let { traj },
