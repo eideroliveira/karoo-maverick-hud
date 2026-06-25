@@ -326,6 +326,36 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             if (critical) Layout(listOf(SaverTuning.MINIMAL_PAGE), pinnedPage = null, trajectoryPageIndex = null) else layout
         }.distinctUntilChanged()
 
+        // Block·rep tracker for the synthetic [WorkoutBlocks.FIELD_REP] field — stateful, so it lives
+        // in its own persistent flow (the per-layout FormatContext is rebuilt whenever an auto-page
+        // appears and would reset the count mid-ride). Gated on the field being configured somewhere;
+        // its three workout streams are Idle outside a structured workout, so it stays quiet otherwise.
+        val blockRepFlow = configFlow
+            .map { cfg ->
+                WorkoutBlocks.FIELD_REP in cfg.workoutPage ||
+                    WorkoutBlocks.FIELD_REP in cfg.segmentPage ||
+                    WorkoutBlocks.FIELD_REP in cfg.climbPage ||
+                    cfg.pages.any { WorkoutBlocks.FIELD_REP in it }
+            }
+            .distinctUntilChanged()
+            .flatMapLatest { enabled ->
+                if (!enabled) {
+                    flowOf(null)
+                } else {
+                    combine(
+                        karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT),
+                        karoo.streamDataFlow(DataType.Type.WORKOUT_POWER_TARGET),
+                        karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
+                    ) { stepState, targetState, durState ->
+                        WorkoutBlocks.observe(stepState, targetState, durState, configFlow.value.ftp)
+                    }
+                        .scan(WorkoutBlocks.INITIAL) { state, obs -> state.advance(obs) }
+                        .map { it.display }
+                        .distinctUntilChanged()
+                }
+            }
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         val cellsPipeline = layoutFlow.flatMapLatest { layout ->
             // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
             // CADENCE colouring needs the live power reading for its under-gear rule, and the
@@ -336,7 +366,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             // Synthetic radar fields and the trajectory page marker aren't Karoo streams (radar cells
             // are injected from [nextClimbFlow]; the trajectory draws from [trajectoryFlow]) — keep
             // them out of the subscription set.
-            val streamIds = displayed.filterNot { RouteRadar.isSynthetic(it) || it == RouteTrajectory.PAGE_MARKER }
+            val streamIds = displayed.filterNot { RouteRadar.isSynthetic(it) || WorkoutBlocks.isSynthetic(it) || it == RouteTrajectory.PAGE_MARKER }
             val ids = buildList {
                 addAll(streamIds)
                 if (DataType.Type.CADENCE in streamIds && DataType.Type.POWER !in streamIds) add(DataType.Type.POWER)
@@ -365,6 +395,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             // snapshot only when its page exists (see the snapshot builder).
             cellsFlow.combine(nextClimbFlow) { cells, climb ->
                 cells + FieldFormat.radarCells(climb, configFlow.value.imperial)
+            }.combine(blockRepFlow) { cells, rep ->
+                // The block·rep field is computed off the layout's own subscription; fold its synthetic
+                // cell in (when configured) so it rides the same sample() throttle as the stream cells.
+                if (rep != null) cells + (WorkoutBlocks.FIELD_REP to WorkoutBlocks.cell(rep)) else cells
             }.combine(trajectoryFlow) { cells, traj ->
                 Triple(layout, cells, traj)
             }

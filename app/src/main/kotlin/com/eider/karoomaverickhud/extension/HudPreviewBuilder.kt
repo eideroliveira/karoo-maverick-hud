@@ -28,7 +28,12 @@ object HudPreviewBuilder {
             // "current/target" composite (with range colouring) the rider sees mid-workout. Pages
             // without a target field keep a null context and preview as plain zone-coloured values.
             val ctx = workoutPreviewCtx(ids, cfg, zones, gear, seed)
-            ids.map { id -> FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear) }
+            ids.map { id ->
+                // The block·rep field is synthetic (computed in the live pipeline, not from a stream),
+                // so it has no demo StreamState — render its preview cell directly.
+                if (WorkoutBlocks.isSynthetic(id)) WorkoutBlocks.previewCell()
+                else FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear)
+            }
         }.filter { it.isNotEmpty() }
         val idx = if (pages.isEmpty()) 0 else pageIndex % pages.size
         return HudSnapshot(

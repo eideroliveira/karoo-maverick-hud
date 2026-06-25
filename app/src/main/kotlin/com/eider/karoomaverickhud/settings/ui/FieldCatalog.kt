@@ -14,6 +14,7 @@ import com.eider.karoomaverickhud.extension.FieldSpec
 import com.eider.karoomaverickhud.extension.HR_ZONE_COLORS
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.POWER_ZONE_COLORS
+import com.eider.karoomaverickhud.extension.WorkoutBlocks
 import com.eider.karoomaverickhud.extension.ZoneBand
 import com.eider.karoomaverickhud.extension.zoneIndexByPct
 import io.hammerhead.karooext.models.DataType
@@ -62,10 +63,13 @@ private fun uiUnit(spec: FieldSpec): String {
     return if (spec.suffix.isEmpty()) base else "$base ${spec.suffix}"
 }
 
-/** The fields the HUD can render, derived from the renderer's [FIELD_SPECS] catalog. */
+/**
+ * The fields the HUD can render, derived from the renderer's [FIELD_SPECS] catalog, plus the
+ * synthetic block·rep field (computed in the pipeline, not a Karoo stream, so it isn't in FIELD_SPECS).
+ */
 val UI_FIELDS: Map<String, UiField> = FIELD_SPECS.associate { spec ->
     spec.id to UiField(spec.id, spec.label, uiUnit(spec), iconName(spec.kind), zoneKind(spec.kind))
-}
+} + (WorkoutBlocks.FIELD_REP to UiField(WorkoutBlocks.FIELD_REP, WorkoutBlocks.LABEL, WorkoutBlocks.UNIT, "time", null))
 
 /**
  * Fields provided by other installed extensions (MPA, time to summit, …), discovered at runtime and
@@ -86,7 +90,7 @@ val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
     "Heart" to listOf(DataType.Type.HEART_RATE, DataType.Type.AVERAGE_HR, DataType.Type.MAX_HR),
     "Speed & distance" to listOf(DataType.Type.SPEED, DataType.Type.AVERAGE_SPEED, DataType.Type.MAX_SPEED, DataType.Type.DISTANCE),
     "Time" to listOf(DataType.Type.ELAPSED_TIME, DataType.Type.ELAPSED_TIME_LAP, DataType.Type.ELAPSED_TIME_LAST_LAP),
-    "Workout" to listOf(DataType.Type.WORKOUT_POWER_TARGET, DataType.Type.WORKOUT_CADENCE_TARGET, DataType.Type.WORKOUT_INTERVAL_COUNT, DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
+    "Workout" to listOf(DataType.Type.WORKOUT_POWER_TARGET, DataType.Type.WORKOUT_CADENCE_TARGET, DataType.Type.WORKOUT_INTERVAL_COUNT, WorkoutBlocks.FIELD_REP, DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
     "This lap" to listOf(DataType.Type.DISTANCE_LAP, DataType.Type.AVERAGE_SPEED_LAP, DataType.Type.NORMALIZED_POWER_LAP, DataType.Type.AVERAGE_LAP_HR),
     "Last lap" to listOf(DataType.Type.DISTANCE_LAP_LAST_LAP, DataType.Type.AVERAGE_SPEED_LAST_LAP, DataType.Type.AVERAGE_POWER_LAST_LAP, DataType.Type.NORMALIZED_POWER_LAST_LAP, DataType.Type.AVERAGE_HR_LAST_LAP, DataType.Type.AVERAGE_CADENCE_LAST_LAP),
     "Training" to listOf(DataType.Type.INTENSITY_FACTOR, DataType.Type.VARIABILITY_INDEX, DataType.Type.TRAINING_STRESS_SCORE),

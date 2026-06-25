@@ -556,7 +556,12 @@ object FieldFormat {
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
-            FieldKind.INTERVAL_TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
+            // Interval countdown led by [INTERVAL_TIME_LEAD_MS] (clamped at 0 so the last second reads
+            // 0:00 instead of going negative, which formatDuration would dash). v is ms.
+            FieldKind.INTERVAL_TIME -> HudCell(
+                formatDuration(v?.let { (it - INTERVAL_TIME_LEAD_MS).coerceAtLeast(0.0) }),
+                unit, HudColor.WHITE, spec.icon,
+            )
             // Strava ±delta vs PR/KOM (v is signed ms): ahead → green, behind → red.
             FieldKind.DELTA_TIME -> HudCell(formatDelta(v), unit, deltaColor(v), spec.icon)
             FieldKind.GRADE -> HudCell(v?.let { "%.1f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
@@ -652,6 +657,15 @@ object FieldFormat {
     }
 
     private const val UNDER_GEAR_DWELL_MS = 3_000L
+
+    /**
+     * Lead applied to the interval countdown so the boundary lands closer to Karoo's. Maverick trails
+     * Karoo by roughly a second (BLE poll + sample throttle + glasses redraw), so shaving 1 s off the
+     * time-to-step-finish makes the step start/finish read 1 s sooner — matching what the rider sees on
+     * the head unit. Only the countdown is shifted; the target value can't be led (the SDK streams only
+     * the current step), so it still switches when Karoo sends the new step.
+     */
+    private const val INTERVAL_TIME_LEAD_MS = 1_000.0
 
     private fun Double?.intOrDash(): String = this?.roundToInt()?.toString() ?: "--"
 
