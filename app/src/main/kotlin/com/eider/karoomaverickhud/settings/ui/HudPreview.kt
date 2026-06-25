@@ -7,6 +7,7 @@
 package com.eider.karoomaverickhud.settings.ui
 
 import com.eider.karoomaverickhud.extension.FieldFormat
+import com.eider.karoomaverickhud.extension.HudFontSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,6 +59,20 @@ fun columnOrder(count: Int): Pair<List<Int>, List<Int>> = when (count.coerceAtMo
     4 -> listOf(0, 2) to listOf(1, 3)
     5 -> listOf(0, 4, 2) to listOf(1, 3)
     else -> listOf(0, 4, 2) to listOf(1, 5, 3)
+}
+
+/** Read-only preview value sp for the chosen HUD font size — mirrors the glasses 33/38/42 px faces. */
+fun hudValueSp(size: HudFontSize): Float = when (size) {
+    HudFontSize.SMALL -> 33f
+    HudFontSize.MEDIUM -> 38f
+    HudFontSize.LARGE -> 42f
+}
+
+/** Editor-slot value sp for the chosen size — a touch smaller, since slots are bordered tap targets. */
+fun editValueSp(size: HudFontSize): Float = when (size) {
+    HudFontSize.SMALL -> 27f
+    HudFontSize.MEDIUM -> 30f
+    HudFontSize.LARGE -> 33f
 }
 
 private val LENS_BG = Brush.radialGradient(
@@ -135,11 +150,11 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val demo = values[fieldId]
     val color = cellColor(field, demo, cfg)
     val label = field?.unit?.takeIf { it.isNotEmpty() } ?: field?.label ?: ""
-    // Value size mirrors HudScreen's faces: 33sp on ≤4-field pages, the taller 42sp face on the
-    // side-by-side 5–6-field pages. Only the label changes place. Label/icon use dim grey (K.text2)
-    // and only the value takes the zone color, so the preview reads exactly like the glasses.
+    // Value size mirrors the glasses faces, picked by the rider's HUD font size (33/38/42 px) rather
+    // than the field count. Only the label changes place. Label/icon use dim grey (K.text2) and only
+    // the value takes the zone color, so the preview reads exactly like the glasses.
     val value: @Composable () -> Unit = {
-        KText(demo?.display ?: "--", color = color, size = (if (big) 33 else 42).sp,
+        KText(demo?.display ?: "--", color = color, size = hudValueSp(cfg.hudFontSize).sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
     }
     // With icons on, the icon replaces the label outright (only fields with a real glasses icon —
@@ -328,7 +343,7 @@ private fun EditSlot(
             // (K.text2); value keeps the zone color — same split as the glasses (HudScreen) and
             // the read-only LensCell preview.
             val value: @Composable () -> Unit = {
-                KText(demo?.display ?: "--", color = color, size = (if (big) 27 else 32).sp,
+                KText(demo?.display ?: "--", color = color, size = editValueSp(cfg.hudFontSize).sp,
                     weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false, letterSpacing = (-0.5).sp)
             }
             val showIcon = cfg.showIcons && fieldId?.let { FieldFormat.iconFor(it) } != null
