@@ -256,9 +256,17 @@ data class HudCell(
     val units: String,
     val color: HudColor = HudColor.WHITE,
     val icon: HudIcon? = null,
+    /**
+     * Short differentiator drawn beside the icon (only when HUD icons are on) for fields that share
+     * an icon — e.g. "to top" beside the distance glyph, "NP" beside the power glyph, the time
+     * fields by what they time. Empty for the original field that owns an icon, so it shows the icon
+     * alone, and for fields with no icon. See [FieldFormat.iconTagFor].
+     */
+    val iconLabel: String = "",
 ) {
     companion object {
-        fun blank(dataTypeId: String) = HudCell("--", "", HudColor.WHITE, FieldFormat.iconFor(dataTypeId))
+        fun blank(dataTypeId: String) =
+            HudCell("--", "", HudColor.WHITE, FieldFormat.iconFor(dataTypeId), FieldFormat.iconTagFor(dataTypeId))
     }
 }
 
@@ -322,6 +330,39 @@ object FieldFormat {
 
     /** Icon for a data type, if it has a glyph asset (used for blanks and when HUD icons are on). */
     fun iconFor(dataTypeId: String): HudIcon? = specByDataType[dataTypeId]?.icon
+
+    /**
+     * The "original" field that owns each icon outright — rendered with the icon alone (no tag) when
+     * HUD icons are on. Every other field reusing one of these icons gets a short differentiator tag
+     * beside it (see [iconTagFor]), so the four time fields, the climb's two distances, NP vs power,
+     * and the rest are told apart at a glance.
+     */
+    private val BASE_ICON_TYPES: Set<String> = setOf(
+        DataType.Type.POWER,
+        DataType.Type.CADENCE,
+        DataType.Type.HEART_RATE,
+        DataType.Type.SPEED,
+        DataType.Type.DISTANCE,
+        DataType.Type.ELAPSED_TIME,
+        DataType.Type.PEDAL_POWER_BALANCE,
+    )
+
+    /**
+     * Short tag shown beside a field's icon to tell apart fields that share it (e.g. distance +
+     * "to top", power + "NP", the time fields by what they time). Empty for the [BASE_ICON_TYPES]
+     * original that owns the icon (shown icon-only) and for fields with no icon. Derived from the
+     * spec's [FieldSpec.suffix] (avg/max/lap/LL) else its [FieldSpec.unit] override — dropping the
+     * base unit so the tag stays terse beside the icon.
+     */
+    fun iconTagFor(dataTypeId: String): String {
+        val spec = specByDataType[dataTypeId] ?: return ""
+        if (spec.icon == null || dataTypeId in BASE_ICON_TYPES) return ""
+        return when {
+            spec.suffix.isNotEmpty() -> spec.suffix
+            spec.unit != null -> spec.unit
+            else -> ""
+        }
+    }
 
     /** Short header label for a data type id — used by the settings field picker only. */
     fun labelFor(dataTypeId: String): String {
@@ -452,6 +493,7 @@ object FieldFormat {
             if (imperial) "mi" else "km",
             HudColor.CYAN,
             HudIcon.DISTANCE,
+            iconLabel = "to climb",
         ),
         RouteRadar.FIELD_ETA to HudCell(
             // formatDuration expects milliseconds (see its note); ETA is seconds.
@@ -459,6 +501,7 @@ object FieldFormat {
             "eta",
             HudColor.WHITE,
             HudIcon.TIME,
+            iconLabel = "eta",
         ),
         RouteRadar.FIELD_GRADE to HudCell(
             climb?.grade?.let { "%.0f".format(it) } ?: "--",
@@ -512,7 +555,7 @@ object FieldFormat {
             DataType.Type.WORKOUT_POWER_TARGET -> ctx?.powerTarget = targetOf(state)
             DataType.Type.WORKOUT_CADENCE_TARGET -> ctx?.cadenceTarget = targetOf(state)
         }
-        return when (spec.kind) {
+        val cell = when (spec.kind) {
             FieldKind.POWER -> {
                 // Cache live power so the next CADENCE update can evaluate the under-gear rule.
                 if (spec.id == DataType.Type.POWER) ctx?.lastPowerWatts = v
@@ -574,6 +617,8 @@ object FieldFormat {
                 HudCell(gv, gu, HudColor.WHITE, spec.icon)
             }
         }
+        // Stamp the icon's differentiator tag once, rather than threading it through every branch.
+        return cell.copy(iconLabel = iconTagFor(spec.id))
     }
 
     // Power color: map %FTP into the rider's editable [DEFAULT_POWER_ZONES] bands (the 7-color

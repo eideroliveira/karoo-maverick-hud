@@ -36,23 +36,27 @@ import com.eider.karoomaverickhud.extension.Trajectory
  *    ([Text.getMeasuredContentWidth], populated on setText) plus [sideGap], so it tucks against
  *    the digits no matter how wide the number is.
  *
- * The value is tinted by its training-zone colour; the unit/icon stays dim grey. The SDK's [Align]
- * decides which edge of a single line sits at its anchor X, so values right-align to [rightX] on
- * the right column and left-align to [leftX] on the left. Forward/back temple-pad swipes flip pages.
+ * The value is tinted by its training-zone colour and is the only coloured element; the label/tag
+ * text renders white and the icon stays dim grey. The SDK's [Align] decides which edge of a single
+ * line sits at its anchor X, so values right-align to [rightX] on the right column and left-align to
+ * [leftX] on the left. Forward/back temple-pad swipes flip pages.
  */
 class HudScreen : Screen(420f, 150f) {
 
     private val screenW = 420f
     private val leftX = 8f
     private val rightX = screenW - 8f
-    private val iconW = 26f
+    // Reduced icon footprint (was 26, matching the source PNGs): a smaller glyph leaves room for a
+    // differentiator tag beside it and reads as secondary to the value. [iconTextGap] is the space
+    // between the icon and that tag. Icons are scaled to [iconW] at render via Image.setWidthHeight.
+    private val iconW = 18f
+    private val iconTextGap = 3f
 
     // Side-by-side (5–6 field) tuning, in screen px. [sideGap] is the space between the value and
-    // its inboard unit/icon; [sideLabelDy]/[sideIconDy] drop the smaller unit/icon down to sit
-    // against the tall ~42px value face. Tune on-device if the unit crowds the digits or sits high/low.
+    // its inboard icon/label; [sideLabelDy] drops the smaller icon/label down to sit against the
+    // tall ~42px value face. Tune on-device if the label crowds the digits or sits high/low.
     private val sideGap = 6f
     private val sideLabelDy = 16f
-    private val sideIconDy = 8f
 
     // Centre control-window geometry (a bordered box with time/signal/battery + a brightness slider).
     private val boxX = 50f
@@ -86,8 +90,9 @@ class HudScreen : Screen(420f, 150f) {
         return if (count <= 4) {
             // Big value face (~33px) stacked over a small unit (~18px): two roomy rows. The gap
             // tucks the unit just under the digits; rows sit clear of the 150px top/bottom edges.
+            // The icon shares the label's line (icon + differentiator tag side by side), so iconY == labelY.
             fun stack(isRight: Boolean, valueY: Float) =
-                Slot(isRight, valueY = valueY, labelY = valueY + 30f, iconY = valueY + 26f, side = false)
+                Slot(isRight, valueY = valueY, labelY = valueY + 30f, iconY = valueY + 30f, side = false)
             arrayOf(
                 stack(false, 14f), stack(true, 14f),    // TL, TR
                 stack(false, 88f), stack(true, 88f),    // BL, BR
@@ -97,7 +102,7 @@ class HudScreen : Screen(420f, 150f) {
             // beside it on the inboard side. Without a stacked unit line, three of these taller value
             // rows still sit evenly down the 150px lens (digits occupy the upper part of each box).
             fun side(isRight: Boolean, valueY: Float) =
-                Slot(isRight, valueY = valueY, labelY = valueY + sideLabelDy, iconY = valueY + sideIconDy, side = true)
+                Slot(isRight, valueY = valueY, labelY = valueY + sideLabelDy, iconY = valueY + sideLabelDy, side = true)
             arrayOf(
                 side(false, 4f), side(true, 4f),       // TL, TR
                 side(false, 104f), side(true, 104f),   // BL, BR
@@ -510,8 +515,10 @@ class HudScreen : Screen(420f, 150f) {
     }
 
     /**
-     * Render one cell: the value, then either the unit/label text or — when icons are on — its icon.
-     * On ≤4-field pages the label/icon stacks under the value; on 5–6-field pages ([Slot.side]) it
+     * Render one cell: the value, then its label area. With icons on the label area is the field's
+     * icon plus a short white differentiator tag for fields that share an icon ([HudCell.iconLabel])
+     * — the original field that owns an icon shows it alone; with icons off it's the full unit text.
+     * On ≤4-field pages the label area stacks under the value; on 5–6-field pages ([Slot.side]) it
      * sits beside the value, offset by the value's measured width so it tucks against the digits.
      */
     private fun layoutCell(i: Int, slot: Slot, cell: HudCell?, showIcons: Boolean) {
@@ -522,45 +529,50 @@ class HudScreen : Screen(420f, 150f) {
         values[i].setText(cell?.value ?: "").setForegroundColor(color)
         values[i].setTextAlign(align).setXY(anchorX, slot.valueY)
 
-        // With icons on, the icon stands in for the label entirely; cells without an icon still
-        // fall back to the text so the field never goes unlabeled. The colored value carries the
-        // zone signal; the label/icon stays dim grey so it recedes behind the value (a second
-        // hierarchy cue beyond size) — fewer colored elements per page reads cleaner on the LCOS.
+        // The label/tag text. With icons on it's the short differentiator that tells fields sharing
+        // an icon apart — empty for the original that owns the icon, so it shows the icon alone;
+        // with icons off it's the full unit. White either way now (a legible second line), while
+        // the zone-coloured value stays the only coloured element on the LCOS.
         val icon = cell?.icon
-        val labelText = if (showIcons && icon != null) "" else cell?.units.orEmpty()
-        units[i].setText(labelText).setForegroundColor(LABEL_RGBA)
+        val iconOn = showIcons && icon != null
+        val text = if (iconOn) cell?.iconLabel.orEmpty() else cell?.units.orEmpty()
+        units[i].setText(text).setForegroundColor(WHITE_RGBA)
         units[i].setTextAlign(align)
 
-        // Where the unit/icon hugs. Stacked pages anchor it at the column edge, under the value;
-        // side pages push it past the value by the value's measured width + a gap, so it tucks
-        // inboard against the digits however wide the number is. setText (above) already refreshed
-        // the value's cachedMeasuredWidth, so getMeasuredContentWidth is current this frame.
-        val labelAnchorX: Float
-        val iconX: Float
-        if (slot.side) {
+        // Where the icon+tag pair hugs. Stacked pages anchor it at the column edge under the value;
+        // side pages push it inboard past the value by the value's measured width + a gap, so it
+        // tucks against the digits however wide the number is. setText (above) already refreshed
+        // each element's cachedMeasuredWidth, so getMeasuredContentWidth is current this frame.
+        val tagX: Float = if (slot.side) {
             val valueW = values[i].getMeasuredContentWidth()
-            if (slot.isRight) {
-                labelAnchorX = rightX - valueW - sideGap  // label right-aligns here, grows inboard
-                iconX = labelAnchorX - iconW
-            } else {
-                labelAnchorX = leftX + valueW + sideGap   // label left-aligns here, grows inboard
-                iconX = labelAnchorX
-            }
+            if (slot.isRight) rightX - valueW - sideGap else leftX + valueW + sideGap
         } else {
-            labelAnchorX = anchorX
-            iconX = if (slot.isRight) rightX - iconW else leftX
+            anchorX
         }
-        units[i].setXY(labelAnchorX, slot.labelY)
 
-        if (!showIcons || icon == null) {
+        // Lay the icon and its tag side by side, growing inboard (rightward on the left column,
+        // leftward on the right) so the pair never overlaps the value or the clear centre.
+        if (icon == null || !showIcons) {
+            units[i].setXY(tagX, slot.labelY)
             icons[i].setVisibility(false)
             currentIcon[i] = null
         } else {
+            val textW = if (text.isEmpty()) 0f else units[i].getMeasuredContentWidth()
+            val gap = if (textW > 0f) iconTextGap else 0f
+            val iconX: Float
+            if (slot.isRight) {
+                units[i].setXY(tagX, slot.labelY)                 // tag right-aligns at tagX
+                iconX = tagX - textW - gap - iconW                // icon sits to the tag's left
+            } else {
+                iconX = tagX
+                units[i].setXY(tagX + iconW + gap, slot.labelY)   // tag left-aligns just past the icon
+            }
             if (currentIcon[i] != icon) {
                 icons[i].setResource(imgSrcFor(icon))
                 currentIcon[i] = icon
             }
-            icons[i].setForegroundColor(LABEL_RGBA).setXY(iconX, slot.iconY).setVisibility(true)
+            icons[i].setWidthHeight(iconW, iconW).setForegroundColor(LABEL_RGBA)
+                .setXY(iconX, slot.iconY).setVisibility(true)
         }
     }
 
@@ -663,11 +675,10 @@ class HudScreen : Screen(420f, 150f) {
         private val PURPLE_RGBA = EvsColors.fromRgb(0xFF, 0x60, 0xB0)  // pink — stock too dim
         private val CYAN_RGBA = EvsColor.Cyan.rgba
 
-        // Secondary ink (unit labels + field icons): a dim grey, so the colored value is the only
-        // bright/colored element and stays the most legible thing on the LCOS. Units are static per
-        // field and quickly memorised, so they don't need full brightness. Matches K.text2 in
-        // KarooTheme so the settings preview reads the same. Bump toward white here if the labels
-        // turn out too faint to read on-device.
+        // Secondary ink: a dim grey for the field icons and the control-window hint/zoom chrome, so
+        // the colored value stays the brightest element. (Unit/tag labels now render white — see
+        // layoutCell — so they read clearly as the value's second line.) Matches Lens.label in
+        // KarooTheme so the settings preview reads the same.
         private val LABEL_RGBA = EvsColors.fromRgb(0x99, 0xA1, 0xAC)
 
         // Trajectory map geometry: the rider sits near the bottom looking up; the road ahead fills
