@@ -18,6 +18,7 @@ import UIKit.widgets.UIElement
 import com.eider.karoomaverickhud.extension.BatteryWarn
 import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
+import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
@@ -114,6 +115,7 @@ class HudScreen : Screen(420f, 150f) {
     // Element pool is sized for the max (six); only the active fields are positioned and shown.
     private val cellCount = MAX_CELLS
     private var layoutCount = 4
+    private var layoutFontSize = HudFontSize.MEDIUM
     private var slots = slotsFor(layoutCount)
 
     private val values = Array(cellCount) { Text() }
@@ -122,17 +124,22 @@ class HudScreen : Screen(420f, 150f) {
 
     // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
     // assets/fonts. Each occupies its own glasses font slot; the HxW token in each filename is parsed
-    // by the SDK to set the glyph dimensions, so the generated names are verbatim. ≤4-field pages stack
-    // the big 33×25 value over the 18×12 unit. 5–6-field pages lay the unit/icon *beside* the value
-    // (see [slotsFor]); freeing that vertical room lets them run an even taller 42×31 value face for a
-    // markedly more legible three-row readout. The unit is the 18×12 face on every page. (The old
-    // 31×22 / 13×9 faces are now unused.)
-    private val valueFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s1)
-    private val valueFontTall = Font("fonts/RobotoCondensed-SemiBold.ttf.42x31.2bpp.sifz", Font.Slot.s2)
+    // by the SDK to set the glyph dimensions, so the generated names are verbatim. The value runs one
+    // of three faces chosen by the rider's [HudFontSize] — 33×25 (Small), 38×28 (Medium, the default
+    // "between" size) or 42×31 (Large) — independent of field count. The unit is always the 18×12 face;
+    // the stacked (≤4) vs side-by-side (5–6) layout still follows the field count (see [slotsFor]).
+    // (The old 31×22 / 13×9 faces are now unused.)
+    private val valueFontSmall = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s1)
+    private val valueFontMedium = Font("fonts/RobotoCondensed-SemiBold.ttf.38x28.2bpp.sifz", Font.Slot.s4)
+    private val valueFontLarge = Font("fonts/RobotoCondensed-SemiBold.ttf.42x31.2bpp.sifz", Font.Slot.s2)
     private val unitFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
 
-    /** Value face: the big 33×25 face on ≤4-field pages; the tall 42×31 face on the side-by-side 5–6 pages. */
-    private fun valueFontFor(count: Int): Font = if (count <= 4) valueFontBig else valueFontTall
+    /** Value face for the rider's chosen [HudFontSize] (independent of field count). */
+    private fun valueFontFor(size: HudFontSize): Font = when (size) {
+        HudFontSize.SMALL -> valueFontSmall
+        HudFontSize.MEDIUM -> valueFontMedium
+        HudFontSize.LARGE -> valueFontLarge
+    }
 
     /** Unit face — the 18×12 face on every count. */
     private fun unitFontFor(@Suppress("UNUSED_PARAMETER") count: Int): Font = unitFontBig
@@ -233,7 +240,7 @@ class HudScreen : Screen(420f, 150f) {
                 .addTo(this)
             values[i]
                 .setText("")
-                .setResource(valueFontFor(layoutCount))
+                .setResource(valueFontFor(layoutFontSize))
                 .setTextAlign(Align.left)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
@@ -377,12 +384,12 @@ class HudScreen : Screen(420f, 150f) {
             .addTo(this)
     }
 
-    /** Re-flow slot positions when the active field count changes. */
-    private fun applyCount(count: Int) {
+    /** Re-flow slot positions / value face when the active field count or the chosen font size changes. */
+    private fun applyLayout(count: Int, size: HudFontSize) {
         layoutCount = count
+        layoutFontSize = size
         slots = slotsFor(count)
-        // ≤4-field pages get the big value + medium unit; 5–6-field pages the larger value + smaller unit.
-        val vf = valueFontFor(count)
+        val vf = valueFontFor(size)
         val uf = unitFontFor(count)
         for (i in 0 until cellCount) {
             values[i].setResource(vf)
@@ -440,7 +447,7 @@ class HudScreen : Screen(420f, 150f) {
 
         val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
         val count = page.size.coerceIn(1, cellCount)
-        if (count != layoutCount) applyCount(count)
+        if (count != layoutCount || snap.fontSize != layoutFontSize) applyLayout(count, snap.fontSize)
         for (i in 0 until cellCount) {
             if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }

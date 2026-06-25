@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.eider.karoomaverickhud.extension.DEFAULT_HR_ZONES
 import com.eider.karoomaverickhud.extension.DEFAULT_POWER_ZONES
+import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.MAX_ROWS
 import com.eider.karoomaverickhud.extension.MIN_ROWS
 import com.eider.karoomaverickhud.extension.RouteRadar
@@ -82,6 +83,8 @@ data class HudConfig(
     val showClock: Boolean,
     /** Whether the glasses draw each data field's icon next to its unit/label. */
     val showIcons: Boolean,
+    /** Glasses value font size (Small 33 / Medium 38 / Large 42 px face). Medium is the default. */
+    val hudFontSize: HudFontSize,
     /**
      * Manual battery-saver ("ECO") toggle. When on, the bridge dims the display, slows the BLE poll
      * and HUD push, blanks while the ride is paused/stopped, and lengthens page cycling — all to
@@ -201,6 +204,7 @@ data class HudConfig(
             gear = GearConfig(),
             showClock = true,
             showIcons = false,
+            hudFontSize = HudFontSize.MEDIUM,
             saverEnabled = false,
             saverThresholdPct = com.eider.karoomaverickhud.maverick.SaverTuning.DEFAULT_THRESHOLD_PCT,
             radarEnabled = true,
@@ -244,6 +248,7 @@ object HudPreferences {
     private val KEY_GEAR = stringPreferencesKey("gear_json")
     private val KEY_SHOW_CLOCK = booleanPreferencesKey("show_clock")
     private val KEY_SHOW_ICONS = booleanPreferencesKey("show_icons")
+    private val KEY_HUD_FONT_SIZE = stringPreferencesKey("hud_font_size")
     private val KEY_SAVER_ENABLED = booleanPreferencesKey("saver_enabled")
     private val KEY_SAVER_THRESHOLD = intPreferencesKey("saver_threshold_pct")
     private val KEY_RADAR_ENABLED = booleanPreferencesKey("radar_enabled")
@@ -277,6 +282,8 @@ object HudPreferences {
             gear = prefs[KEY_GEAR]?.let { decodeGear(it) } ?: HudConfig.DEFAULT.gear,
             showClock = prefs[KEY_SHOW_CLOCK] ?: HudConfig.DEFAULT.showClock,
             showIcons = prefs[KEY_SHOW_ICONS] ?: HudConfig.DEFAULT.showIcons,
+            hudFontSize = prefs[KEY_HUD_FONT_SIZE]?.let { runCatching { HudFontSize.valueOf(it) }.getOrNull() }
+                ?: HudConfig.DEFAULT.hudFontSize,
             saverEnabled = prefs[KEY_SAVER_ENABLED] ?: HudConfig.DEFAULT.saverEnabled,
             saverThresholdPct = (prefs[KEY_SAVER_THRESHOLD] ?: HudConfig.DEFAULT.saverThresholdPct).coerceIn(0, 100),
             radarEnabled = prefs[KEY_RADAR_ENABLED] ?: HudConfig.DEFAULT.radarEnabled,
@@ -328,6 +335,10 @@ object HudPreferences {
 
     suspend fun setShowIcons(context: Context, show: Boolean) {
         context.dataStore.edit { it[KEY_SHOW_ICONS] = show }
+    }
+
+    suspend fun setHudFontSize(context: Context, size: HudFontSize) {
+        context.dataStore.edit { it[KEY_HUD_FONT_SIZE] = size.name }
     }
 
     suspend fun setSaverEnabled(context: Context, enabled: Boolean) {

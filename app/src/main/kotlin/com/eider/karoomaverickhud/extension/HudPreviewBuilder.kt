@@ -39,6 +39,7 @@ object HudPreviewBuilder {
             rows = cfg.rows,
             clock = "", // stamped by the bridge if the clock is enabled
             showIcons = cfg.showIcons,
+            fontSize = cfg.hudFontSize,
         )
     }
 

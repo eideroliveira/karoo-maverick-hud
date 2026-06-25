@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.eider.karoomaverickhud.extension.cellsForRows
+import com.eider.karoomaverickhud.extension.HudFontSize
 import io.hammerhead.karooext.models.DataType
 import com.eider.karoomaverickhud.settings.HudConfig
 import com.eider.karoomaverickhud.settings.HudPreferences
@@ -123,6 +124,20 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 }
             }
 
+            KSectionLabel("Value text size")
+            CardBlock {
+                Column(Modifier.padding(14.dp)) {
+                    KSegmented(
+                        listOf(HudFontSize.SMALL to "Small", HudFontSize.MEDIUM to "Medium", HudFontSize.LARGE to "Large"),
+                        cfg.hudFontSize,
+                    ) { scope.launch { HudPreferences.setHudFontSize(ctx, it) } }
+                    KText(
+                        "How big the data values read on the glasses. Medium sits between the old 4- and 6-field sizes.",
+                        color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 11.dp),
+                    )
+                }
+            }
+
             KSectionLabel("Race mode")
             CardBlock {
                 KRow(last = true) {
@@ -142,17 +157,17 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                     // Accent outline marks a page that's in race mode (when race mode is on).
                     val raceOn = cfg.raceMode && cfg.racePages.getOrElse(i) { true }
                     Box(
-                        Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
+                        Modifier.height(50.dp).clip(RoundedCornerShape(10.dp))
                             .background(if (on) K.accent else K.surface2)
                             .border(1.dp, when { on -> K.accent; raceOn -> K.accent.copy(alpha = 0.5f); else -> K.line2 }, RoundedCornerShape(10.dp))
                             .clickable(remember { MutableInteractionSource() }, null) { active = i }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center,
-                    ) { KText("${i + 1}", color = if (on) K.onAccent else K.text2, size = 18.sp, weight = FontWeight.Bold, family = CondFamily) }
+                    ) { KText("${i + 1}", color = if (on) K.onAccent else K.text2, size = 24.sp, weight = FontWeight.Bold, family = CondFamily) }
                 }
                 if (pages.size < MAX_PAGES) {
                     Box(
-                        Modifier.height(38.dp).clip(RoundedCornerShape(10.dp)).background(K.surface2)
+                        Modifier.height(50.dp).clip(RoundedCornerShape(10.dp)).background(K.surface2)
                             .border(1.dp, K.line3, RoundedCornerShape(10.dp))
                             .clickable(remember { MutableInteractionSource() }, null) {
                                 setPages(pages + listOf(listOf(DataType.Type.POWER, DataType.Type.HEART_RATE)))
@@ -163,7 +178,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            KIcon("plus", 16.dp, K.accent); KText("Page", color = K.accent, size = 15.sp, weight = FontWeight.SemiBold)
+                            KIcon("plus", 20.dp, K.accent); KText("Page", color = K.accent, size = 19.sp, weight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -284,7 +299,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
 @Composable
 private fun AutoPageTab(label: String, icon: String, on: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.height(38.dp).clip(RoundedCornerShape(10.dp))
+        Modifier.height(50.dp).clip(RoundedCornerShape(10.dp))
             .background(if (on) K.accent else K.surface2)
             .border(1.dp, if (on) K.accent else K.line2, RoundedCornerShape(10.dp))
             .clickable(remember { MutableInteractionSource() }, null) { onClick() }
@@ -292,8 +307,8 @@ private fun AutoPageTab(label: String, icon: String, on: Boolean, onClick: () ->
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            KIcon(icon, 14.dp, if (on) K.onAccent else K.text2)
-            KText(label, color = if (on) K.onAccent else K.text2, size = 15.sp, weight = FontWeight.SemiBold)
+            KIcon(icon, 18.dp, if (on) K.onAccent else K.text2)
+            KText(label, color = if (on) K.onAccent else K.text2, size = 19.sp, weight = FontWeight.SemiBold)
         }
     }
 }
@@ -329,12 +344,12 @@ private fun FieldPickerSheet(
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) {
-                            KIcon(f.icon, 20.dp, pickerIconColor(f))
+                        Box(Modifier.size(46.dp).clip(RoundedCornerShape(11.dp)), contentAlignment = Alignment.Center) {
+                            KIcon(f.icon, 24.dp, pickerIconColor(f))
                         }
                         Column(Modifier.weight(1f)) {
                             Row {
-                                KText(f.label, color = if (isUsed) K.text.copy(alpha = 0.5f) else K.text, size = 19.sp, weight = FontWeight.Medium)
+                                KText(f.label, color = if (isUsed) K.text.copy(alpha = 0.5f) else K.text, size = 24.sp, weight = FontWeight.Medium)
                                 if (f.unit.isNotEmpty()) KText(" · ${f.unit}", color = K.text3, size = 15.sp)
                             }
                             if (isUsed) KText("already on this page", color = K.text2, size = 15.sp)
