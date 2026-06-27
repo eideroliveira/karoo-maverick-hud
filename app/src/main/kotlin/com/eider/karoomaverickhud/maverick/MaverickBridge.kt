@@ -93,9 +93,9 @@ class MaverickBridge(
     // map is shown. Starts on the middle (200 m) look-ahead.
     @Volatile private var trajZoomIndex: Int = 1
 
-    // The pinned-page index from the last snapshot, so we snap to a segment/climb page only on the
-    // rising edge (and when the pin changes) rather than yanking back every tick — the rider can
-    // still flip away mid-segment. Null means nothing is pinned.
+    // The pinned-page index from the last snapshot, so we snap to a pinned page (a live Strava
+    // segment) only on the rising edge (and when the pin changes) rather than yanking back every
+    // tick — the rider can still flip away mid-segment. Null means nothing is pinned.
     @Volatile private var lastPinnedPage: Int? = null
 
     // The last snapshot the ride pipeline produced (as opposed to a preview frame). Used to snap
@@ -196,9 +196,9 @@ class MaverickBridge(
     }
 
     fun update(snapshot: HudSnapshot) {
-        // A live segment/climb page takes over: snap to it on the rising edge (and when the pinned
-        // page changes, e.g. segment→climb), then leave the rider free to flip while it stays
-        // pinned. Cleared pins resume normal cycling without a snap.
+        // A live Strava-segment page takes over: snap to it on the rising edge (and when the pinned
+        // page changes), then leave the rider free to flip while it stays pinned. Cleared pins resume
+        // normal cycling without a snap.
         val pin = snapshot.pinnedPage
         if (pin != null && pin != lastPinnedPage && pin < snapshot.pages.size) pageIndex = pin
         lastPinnedPage = pin
@@ -674,7 +674,7 @@ class MaverickBridge(
                 // Saver lengthens the dwell (fewer redraws/BLE pushes) without stopping paging outright.
                 delay(if (Eco.active.value) maxOf(baseCycle, SaverTuning.SAVER_AUTOCYCLE_MS) else baseCycle)
                 if (HudState.previewSnapshot.value != null) continue // preview owns paging
-                if (lastSnapshot.pinnedPage != null) continue // a segment/climb page is pinned
+                if (lastSnapshot.pinnedPage != null) continue // a segment page is pinned
                 // Race mode forces auto-cycling regardless of the configured page mode (hands-off).
                 if (configState.value.pageMode == PageMode.AUTO || configState.value.raceMode) {
                     val count = lastSnapshot.pages.size

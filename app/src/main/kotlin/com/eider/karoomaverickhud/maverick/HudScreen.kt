@@ -17,6 +17,9 @@ import UIKit.widgets.Rect
 import UIKit.widgets.Text
 import UIKit.widgets.UIElement
 import com.eider.karoomaverickhud.extension.BatteryWarn
+import com.eider.karoomaverickhud.extension.ClimbOverlay
+import com.eider.karoomaverickhud.extension.ClimbProfile
+import com.eider.karoomaverickhud.extension.ClimbProfileData
 import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudFontSize
@@ -188,6 +191,17 @@ class HudScreen : Screen(420f, 150f) {
     private val radarLine1 = Text()
     private val radarLine2 = Text()
 
+    // On-climb overlay (a centre overlay shown while climbing): a climb label, the grade/avg-grade
+    // headline, the vertical/horizontal remaining and an optional MPA readout, plus a grade-coloured
+    // elevation silhouette ([climbBars]) with a "you" position marker ([climbMarker]) in the bottom
+    // third. The bars are filled Rects (one per profile bucket), tinted by their local grade.
+    private val climbLabel = Text()
+    private val climbGrade = Text()
+    private val climbDist = Text()
+    private val climbMpa = Text()
+    private val climbBars = Array(ClimbProfile.BUCKETS) { Rect() }
+    private val climbMarker = Rect()
+
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
     // Last frame actually rendered, so onUpdateUI can no-op when nothing changed. The bridge only
@@ -324,6 +338,7 @@ class HudScreen : Screen(420f, 150f) {
         setupControlWindow()
         setupTrajectory()
         setupRadar()
+        setupClimb()
     }
 
     /** Create the trajectory map's polyline, "you" marker and centred footer (all hidden). */
@@ -369,6 +384,50 @@ class HudScreen : Screen(420f, 150f) {
             .setTextAlign(Align.center)
             .setXY(screenW / 2f, 88f)
             .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+    }
+
+    /** Create the on-climb overlay's summary lines and its filled profile bars + marker (all hidden). */
+    private fun setupClimb() {
+        // Profile silhouette first, so the summary text draws over it if they ever overlap.
+        for (bar in climbBars) {
+            bar.setVisibility(false)
+            add(bar)
+        }
+        climbMarker.setFillColor(WHITE_RGBA).setVisibility(false)
+        add(climbMarker)
+
+        climbLabel
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, CLIMB_LABEL_Y)
+            .setForegroundColor(CYAN_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+        climbGrade
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, CLIMB_GRADE_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        climbDist
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, CLIMB_DIST_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        climbMpa
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, CLIMB_MPA_Y)
+            .setForegroundColor(LABEL_RGBA)
             .setVisibility(false)
             .addTo(this)
     }
@@ -444,6 +503,7 @@ class HudScreen : Screen(420f, 150f) {
             for (i in 0 until cellCount) blankCell(i)
             hideTrajectory()
             hideRadar()
+            hideClimb()
             statusText.setText("")
             pauseDot.setText("")
             ecoText.setVisibility(false)
@@ -459,6 +519,7 @@ class HudScreen : Screen(420f, 150f) {
             for (i in 0 until cellCount) blankCell(i)
             hideTrajectory()
             hideRadar()
+            hideClimb()
             statusText.setText("WAITING FOR RIDE")
             pauseDot.setText("KAROO CONNECTED")
             return
@@ -474,12 +535,14 @@ class HudScreen : Screen(420f, 150f) {
             if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }
 
-        // Centre overlays, drawn over the clear centre of whatever page is shown. The descent
-        // trajectory takes precedence over the next-climb radar when both apply.
+        // Centre overlays, drawn over the clear centre of whatever page is shown. Precedence: the
+        // descent trajectory first, then the on-climb summary/profile, then the next-climb radar
+        // preview (you're either approaching a climb or on it, so the latter two rarely coincide).
         when {
-            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar() }
-            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory() }
-            else -> { hideTrajectory(); hideRadar() }
+            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar(); hideClimb() }
+            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideRadar() }
+            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideClimb() }
+            else -> { hideTrajectory(); hideRadar(); hideClimb() }
         }
 
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
@@ -547,6 +610,71 @@ class HudScreen : Screen(420f, 150f) {
         radarTitle.setVisibility(false)
         radarLine1.setVisibility(false)
         radarLine2.setVisibility(false)
+    }
+
+    /** Draw the on-climb summary + grade-coloured profile centred over the current page. */
+    private fun renderClimb(climb: ClimbOverlay) {
+        climbLabel.setText(climb.climbLabel).setVisibility(true)
+        // Headline: current grade over the average grade still to climb, tinted by the current grade.
+        climbGrade.setText("${climb.grade} / ${climb.avgGrade}%")
+            .setForegroundColor(colorRgba(climb.gradeColor))
+            .setVisibility(true)
+        // Vertical metres to the summit ("TOP") and horizontal distance to the end ("END").
+        climbDist.setText("TOP ${climb.toTop}   END ${climb.toEnd}").setVisibility(true)
+        if (climb.mpa != null) {
+            climbMpa.setText("MPA ${climb.mpa}").setVisibility(true)
+        } else {
+            climbMpa.setText("").setVisibility(false)
+        }
+        renderClimbProfile(climb.profile)
+    }
+
+    /**
+     * Draw the filled, grade-coloured elevation silhouette in the overlay's bottom third: one Rect
+     * per profile bucket (height = relief fraction, colour = local grade), plus a thin white marker
+     * at the rider's position along the climb. Hidden when no route elevation is available.
+     */
+    private fun renderClimbProfile(profile: ClimbProfileData?) {
+        if (profile == null || profile.bars.isEmpty()) {
+            hideClimbProfile()
+            return
+        }
+        val w = CLIMB_PROF_RIGHT - CLIMB_PROF_LEFT
+        val h = CLIMB_PROF_BASE_Y - CLIMB_PROF_TOP_Y
+        for (i in climbBars.indices) {
+            val bar = profile.bars.getOrNull(i)
+            if (bar == null) {
+                climbBars[i].setVisibility(false)
+                continue
+            }
+            val x = CLIMB_PROF_LEFT + bar.startFrac * w
+            val bw = (bar.endFrac - bar.startFrac) * w + 1f // +1px so adjacent columns don't hairline-gap
+            val bh = (bar.heightFrac * h).coerceAtLeast(2f)
+            climbBars[i].setFillColor(colorRgba(bar.color))
+                .setXY(x, CLIMB_PROF_BASE_Y - bh)
+                .setWidthHeight(bw, bh)
+                .setVisibility(true)
+        }
+        val mx = CLIMB_PROF_LEFT + profile.progressFrac * w
+        climbMarker.setFillColor(WHITE_RGBA)
+            .setXY(mx - 1f, CLIMB_PROF_TOP_Y)
+            .setWidthHeight(2f, h)
+            .setVisibility(true)
+    }
+
+    /** Hide every on-climb-overlay element (when not on a climb). */
+    private fun hideClimb() {
+        climbLabel.setVisibility(false)
+        climbGrade.setVisibility(false)
+        climbDist.setVisibility(false)
+        climbMpa.setVisibility(false)
+        hideClimbProfile()
+    }
+
+    /** Hide the profile bars + position marker. */
+    private fun hideClimbProfile() {
+        for (bar in climbBars) bar.setVisibility(false)
+        climbMarker.setVisibility(false)
     }
 
     /**
@@ -750,6 +878,18 @@ class HudScreen : Screen(420f, 150f) {
         private const val TRAJ_PEN = 3
         // Centred footer baseline (grade + zoom), just below the "you" marker (clear of the 150px edge).
         private const val TRAJ_FOOTER_Y = 136f
+
+        // On-climb overlay geometry. The summary lines stack down the upper two-thirds of the centre;
+        // the grade-coloured profile fills the bottom third, kept within the clear centre band so it
+        // doesn't crowd the edge-column values.
+        private const val CLIMB_LABEL_Y = 6f
+        private const val CLIMB_GRADE_Y = 26f
+        private const val CLIMB_DIST_Y = 52f
+        private const val CLIMB_MPA_Y = 74f
+        private const val CLIMB_PROF_LEFT = 110f
+        private const val CLIMB_PROF_RIGHT = 310f
+        private const val CLIMB_PROF_TOP_Y = 100f
+        private const val CLIMB_PROF_BASE_Y = 146f
     }
 
     override fun onTouch(touch: TouchDirection) {

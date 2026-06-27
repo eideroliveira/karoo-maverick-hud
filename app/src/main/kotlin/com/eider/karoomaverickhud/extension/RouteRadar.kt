@@ -7,8 +7,8 @@ import io.hammerhead.karooext.models.StreamState
 /**
  * Next-climb radar — a look-ahead that surfaces a compact climb preview in the centre of whatever
  * page is showing as the rider approaches a climb on a loaded route, then steps aside once they hit
- * the ramp (the on-climb page takes over). It answers "what's coming and when": distance to the
- * climb, ETA, average grade and length.
+ * the ramp (the on-climb overlay takes over — see [FieldFormat.climbOverlay]/`ClimbProfile`). It
+ * answers "what's coming and when": distance to the climb, ETA, average grade and length.
  *
  * The climb shapes come from the route's [OnNavigationState.NavigationState.NavigatingRoute.climbs]
  * (SDK 1.1.6+). Position along the route is derived from

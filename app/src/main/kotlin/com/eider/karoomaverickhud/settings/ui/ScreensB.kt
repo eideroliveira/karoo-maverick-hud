@@ -53,7 +53,6 @@ private const val MAX_PAGES = 5
 /** Sentinel "page indexes" for the auto pages (stored separately from the numbered pages). */
 private const val WORKOUT_TAB = -1
 private const val SEGMENT_TAB = -2
-private const val CLIMB_TAB = -3
 
 /** Return a copy of [list] with elements [a] and [b] swapped. */
 private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
@@ -68,13 +67,11 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
     val pages = cfg.pages
     val isWorkout = active == WORKOUT_TAB
     val isSegment = active == SEGMENT_TAB
-    val isClimb = active == CLIMB_TAB
     val isSpecial = active < 0
     val cur = if (isSpecial) active else active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
     val curPage = when {
         isWorkout -> cfg.workoutPage.take(slotCount)
         isSegment -> cfg.segmentPage.take(slotCount)
-        isClimb -> cfg.climbPage.take(slotCount)
         else -> pages.getOrNull(cur) ?: emptyList()
     }
 
@@ -95,7 +92,6 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
         when {
             isWorkout -> scope.launch { HudPreferences.setWorkoutPage(ctx, next) }
             isSegment -> scope.launch { HudPreferences.setSegmentPage(ctx, next) }
-            isClimb -> scope.launch { HudPreferences.setClimbPage(ctx, next) }
             else -> setPages(pages.mapIndexed { i, p -> if (i == cur) next else p })
         }
     }
@@ -183,10 +179,10 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                     }
                 }
                 // The auto pages — always present, each shown on the glasses only when its trigger
-                // is live (mid-workout / on a Strava segment / on a climb).
+                // is live (mid-workout / on a Strava segment). The on-climb readout is now a centre
+                // overlay (see "Route auto-pages" below), not an editable page.
                 AutoPageTab("Workout", "bolt", isWorkout) { active = WORKOUT_TAB }
                 AutoPageTab("Segment", "time", isSegment) { active = SEGMENT_TAB }
-                AutoPageTab("Climb", "distance", isClimb) { active = CLIMB_TAB }
             }
 
             // editable lens
@@ -198,7 +194,6 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             val title = when {
                                 isWorkout -> "Workout page"
                                 isSegment -> "Segment page"
-                                isClimb -> "Climb page"
                                 else -> "Page ${cur + 1}"
                             }
                             KText(title, color = K.text, size = 20.sp, weight = FontWeight.Bold, family = CondFamily)
@@ -217,10 +212,10 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                                 onSlot = { picker = cur to it }, width = 408.dp)
                         }
                         if (isSpecial) {
-                            val help = when {
-                                isWorkout -> "Appears by itself as the first page while a structured workout is loaded — it can't be removed or reordered."
-                                isSegment -> "Takes over the glasses automatically while a Strava live segment is running. Add extension fields (e.g. MPA, time to summit) from the picker."
-                                else -> "Takes over automatically while you're on a climb (when no Strava segment is running). Add extension fields (e.g. MPA, time to summit) from the picker."
+                            val help = if (isWorkout) {
+                                "Appears by itself as the first page while a structured workout is loaded — it can't be removed or reordered."
+                            } else {
+                                "Takes over the glasses automatically while a Strava live segment is running. Add extension fields (e.g. MPA, time to summit) from the picker."
                             }
                             KText(
                                 help,
@@ -257,17 +252,17 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 }
             }
 
-            // Route-aware auto-pages — not field-editable (the radar is a fixed layout; the
-            // trajectory is a drawn map), so they're on/off switches rather than editable tabs.
-            // Each appears automatically when its trigger is live (approaching a climb / descending),
-            // and the trajectory is also reachable by paging.
+            // Route-aware auto-overlays — drawn over the clear centre of whatever page is showing
+            // (fixed layouts / a drawn map), so they're on/off switches rather than editable tabs.
+            // Each appears automatically when its trigger is live (approaching or on a climb /
+            // descending).
             KSectionLabel("Route auto-pages")
             CardBlock {
                 KRow {
                     KIconChip("distance")
                     Column(Modifier.weight(1f)) {
-                        KText("Next-climb radar", color = K.text, size = 19.sp, weight = FontWeight.Medium)
-                        KText("Previews the climb ahead — distance, ETA, grade — as you near it", color = K.text2, size = 15.sp)
+                        KText("Climb radar & profile", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Previews the climb ahead, then shows the live grade, MPA & coloured profile while you're on it", color = K.text2, size = 15.sp)
                     }
                     KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
                 }
@@ -552,8 +547,8 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             KRow {
                 KIconChip("distance")
                 Column(Modifier.weight(1f)) {
-                    KText("Next-climb radar", color = K.text, size = 19.sp, weight = FontWeight.Medium)
-                    KText("Preview the climb ahead — distance, ETA, grade — as you approach it", color = K.text2, size = 15.sp)
+                    KText("Climb radar & profile", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Preview the climb ahead, then the live grade, MPA & coloured profile while you're on it", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
             }
