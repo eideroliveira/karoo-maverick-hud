@@ -272,7 +272,8 @@ data class HudCell(
 
 /**
  * Glasses value font size. Picks which pre-generated Roboto Condensed face the HUD value runs:
- * [SMALL] the 31×22 face, [MEDIUM] the 33×25 face (the default), [LARGE] the 42×31 face.
+ * [SMALL] the SDK stock Small font (~22px, as used by the chrome/overlays), [MEDIUM] the 33×25
+ * Roboto Condensed face (the default), [LARGE] the 42×31 face.
  * The unit face and the stacked/side layout are unaffected; only the value
  * glyph height changes. See HudScreen.valueFontFor.
  */
@@ -301,7 +302,7 @@ data class HudSnapshot(
     val battery: Int? = null,
     /** Whether to draw each cell's icon next to its unit/label. */
     val showIcons: Boolean = false,
-    /** Glasses value font size (Small 31 / Medium 33 / Large 42 px face); Medium is the default. */
+    /** Glasses value font size (Small ≈22px stock / Medium 33 / Large 42 px face); Medium is the default. */
     val fontSize: HudFontSize = HudFontSize.MEDIUM,
     /** Whether battery-saver ("ECO") is engaged — drives the top-left ECO badge on the glasses. */
     val eco: Boolean = false,

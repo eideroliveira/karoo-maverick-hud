@@ -61,16 +61,16 @@ fun columnOrder(count: Int): Pair<List<Int>, List<Int>> = when (count.coerceAtMo
     else -> listOf(0, 4, 2) to listOf(1, 5, 3)
 }
 
-/** Read-only preview value sp for the chosen HUD font size — mirrors the glasses 31/33/42 px faces. */
+/** Read-only preview value sp for the chosen HUD font size — mirrors the glasses ~22 (stock) / 33 / 42 px faces. */
 fun hudValueSp(size: HudFontSize): Float = when (size) {
-    HudFontSize.SMALL -> 31f
+    HudFontSize.SMALL -> 22f
     HudFontSize.MEDIUM -> 33f
     HudFontSize.LARGE -> 42f
 }
 
 /** Editor-slot value sp for the chosen size — a touch smaller, since slots are bordered tap targets. */
 fun editValueSp(size: HudFontSize): Float = when (size) {
-    HudFontSize.SMALL -> 25f
+    HudFontSize.SMALL -> 18f
     HudFontSize.MEDIUM -> 27f
     HudFontSize.LARGE -> 33f
 }
@@ -150,7 +150,7 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val demo = values[fieldId]
     val color = cellColor(field, demo, cfg)
     val label = field?.unit?.takeIf { it.isNotEmpty() } ?: field?.label ?: ""
-    // Value size mirrors the glasses faces, picked by the rider's HUD font size (31/33/42 px) rather
+    // Value size mirrors the glasses faces, picked by the rider's HUD font size (~22/33/42 px) rather
     // than the field count. Only the label changes place. Labels render white and only the value
     // takes the zone color (icons stay dim grey), so the preview reads exactly like the glasses.
     val value: @Composable () -> Unit = {
