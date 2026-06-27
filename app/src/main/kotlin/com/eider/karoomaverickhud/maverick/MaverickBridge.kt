@@ -381,17 +381,17 @@ class MaverickBridge(
      *    AUTO keeps cycling from wherever they land). A bare tap cycles the zoom while the
      *    trajectory map is showing, and is otherwise swallowed so accidental pad touches don't
      *    bring up the window mid-ride.
-     *  - Open: the window focuses one item at a time (Brightness → Auto → Radar → Trajectory);
-     *    long-tap cycles the focus, forward = more/on, tap = less/off, backward dismisses.
+     *  - Open: the window focuses one item at a time (Brightness → Auto → Radar → Trajectory → Race);
+     *    forward cycles the focus, tap toggles the focused value (brightness steps +20% and wraps),
+     *    backward dismisses. Long-tap is reserved for opening, so it's a no-op while open.
      */
     private fun handleTouch(direction: TouchDirection) {
         Timber.d("touch=$direction controlOpen=$controlOpen focus=$ctrlFocus bright=$ctrlBrightness auto=$ctrlAuto")
         if (controlOpen) {
             when (direction) {
                 TouchDirection.backward -> toggleControl()
-                TouchDirection.longTap -> cycleControlFocus()
-                TouchDirection.forward -> applyControlFocus(increase = true)
-                TouchDirection.tap -> applyControlFocus(increase = false)
+                TouchDirection.forward -> cycleControlFocus()
+                TouchDirection.tap -> toggleControlFocus()
                 else -> {}
             }
             return
@@ -469,20 +469,23 @@ class MaverickBridge(
         pushControl()
     }
 
-    /** Long-tap steps the focus through Brightness → Auto → Radar → Trajectory → Race. */
+    /** Forward steps the focus through Brightness → Auto → Radar → Trajectory → Race. */
     private fun cycleControlFocus() {
         ctrlFocus = (ctrlFocus + 1) % CONTROL_ITEMS
         pushControl()
     }
 
-    /** Forward (increase=true) / tap (increase=false) acts on the focused control item. */
-    private fun applyControlFocus(increase: Boolean) {
+    /**
+     * Tap toggles the focused control item: booleans flip on/off; brightness steps up +20% and
+     * wraps from 100% back to 0%, so a single gesture still reaches every level.
+     */
+    private fun toggleControlFocus() {
         when (ctrlFocus) {
-            1 -> setAuto(increase)
-            2 -> setRadarFeature(increase)
-            3 -> setTrajFeature(increase)
-            4 -> setRaceFeature(increase)
-            else -> adjustBrightness(if (increase) +10 else -10)
+            1 -> setAuto(!ctrlAuto)
+            2 -> setRadarFeature(!ctrlRadar)
+            3 -> setTrajFeature(!ctrlTraj)
+            4 -> setRaceFeature(!ctrlRace)
+            else -> adjustBrightness(if (ctrlBrightness >= 100) -100 else +20)
         }
     }
 
