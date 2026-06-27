@@ -78,7 +78,11 @@ fun HubScreen(
 ) {
     val totalFields = cfg.pages.sumOf { it.size }
     val dt = matchingDrivetrain(cfg.gear.drivetrainId, cfg.gear.front, cfg.gear.rear)
-    val page = cfg.pages.getOrNull(previewPage.coerceIn(0, (cfg.pages.size - 1).coerceAtLeast(0))) ?: emptyList()
+    // The preview tours every layout the glasses can raise: the numbered pages, the on-climb page,
+    // the next-climb radar and the trajectory map (the latter two when enabled).
+    val scenes = previewScenes(cfg)
+    val sceneIndex = previewPage.coerceIn(0, (scenes.size - 1).coerceAtLeast(0))
+    val scene = scenes.getOrNull(sceneIndex) ?: PreviewScene("PAGE 1", emptyList())
 
     ScreenScroll {
         // hero
@@ -95,10 +99,10 @@ fun HubScreen(
                 }
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                GlassesPreview(cfg, page, values, previewPage, cfg.pages.size, width = 448.dp,
-                    onTap = if (cfg.pages.size > 1) onPreviewTap else null)
+                GlassesPreview(cfg, scene, values, sceneIndex, scenes.size, width = 448.dp,
+                    onTap = if (scenes.size > 1) onPreviewTap else null)
             }
-            KText("LIVE PREVIEW · TAP TO SWITCH PAGE", color = K.text3, size = 13.sp, letterSpacing = 1.sp,
+            KText("${scene.label} · TAP TO SWITCH", color = K.text3, size = 13.sp, letterSpacing = 1.sp,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Center)
         }
 

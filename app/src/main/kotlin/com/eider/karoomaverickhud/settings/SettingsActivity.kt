@@ -110,14 +110,19 @@ private fun SettingsRoot(autoPair: Boolean) {
     // Bumped on a manual tap to restart the auto-cycle timer, so a tap gives full control.
     var previewCycleReset by remember { mutableStateOf(0) }
 
-    // Cycle the hub's live preview through the configured pages (restarts when tapped).
-    LaunchedEffect(cfg.pages.size, cfg.autoCycleMs, previewCycleReset) {
+    // The hub preview tours every layout — numbered pages plus the climb / radar / trajectory
+    // auto-scenes (see previewScenes); the cycle and bounds index into that scene list, not the
+    // numbered pages alone.
+    val sceneCount = com.eider.karoomaverickhud.settings.ui.previewScenes(cfg).size
+
+    // Cycle the hub's live preview through every scene (restarts when tapped).
+    LaunchedEffect(sceneCount, cfg.autoCycleMs, previewCycleReset) {
         while (true) {
             delay(cfg.autoCycleMs.coerceAtLeast(1500L))
-            if (cfg.pages.isNotEmpty()) previewPage = (previewPage + 1) % cfg.pages.size
+            if (sceneCount > 0) previewPage = (previewPage + 1) % sceneCount
         }
     }
-    LaunchedEffect(cfg.pages.size) { if (previewPage >= cfg.pages.size) previewPage = 0 }
+    LaunchedEffect(sceneCount) { if (previewPage >= sceneCount) previewPage = 0 }
 
     // --- Pairing / connection (Location guard → BLE perms → our scan dialog), preserved ---
     var gpsBlocked by remember { mutableStateOf(false) }
@@ -250,7 +255,7 @@ private fun SettingsRoot(autoPair: Boolean) {
             when (screen) {
                 "hub" -> HubScreen(cfg, linkConnected, battery = null, values = values, previewPage = previewPage, nav = { screen = it },
                     onPreviewTap = {
-                        if (cfg.pages.isNotEmpty()) previewPage = (previewPage + 1) % cfg.pages.size
+                        if (sceneCount > 0) previewPage = (previewPage + 1) % sceneCount
                         previewCycleReset++
                     })
                 "profile" -> ProfileScreen(cfg, ctx, scope)
