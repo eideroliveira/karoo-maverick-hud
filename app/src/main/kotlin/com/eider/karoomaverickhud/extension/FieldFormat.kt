@@ -141,6 +141,13 @@ class FormatContext {
     var powerTarget: WorkoutTarget? = null
     var cadenceTarget: WorkoutTarget? = null
 
+    /**
+     * Average grade (%) over the *remaining* climb, stashed from the [DataType.Type.CLIMB] stream
+     * (subscribed as a hidden helper whenever the GRADE field is shown). While on a climb the live
+     * GRADE field renders "live/avg-remaining"; null off-climb restores the live grade alone.
+     */
+    var climbAvgRemainingGrade: Double? = null
+
     /** Wall-clock; abstracted so tests can drive time without `System.currentTimeMillis()`. */
     var nowMs: () -> Long = { System.currentTimeMillis() }
 }
@@ -160,7 +167,8 @@ data class WorkoutTarget(val value: Double?, val min: Double?, val max: Double?)
 /**
  * How a field's value is read & formatted. Drives unit, conversion and zone coloring.
  * DELTA_TIME is a signed time (Strava ±vs PR/KOM, green ahead / red behind); GRADE is a one-decimal
- * percent; CLIMB_STEPS renders climb number as "current/total".
+ * percent — rendered as "live/avg-remaining" while on a climb (see [FormatContext.climbAvgRemainingGrade]);
+ * CLIMB_STEPS renders climb number as "current/total".
  */
 enum class FieldKind { POWER, HR, CADENCE, SPEED, DISTANCE, TIME, INTERVAL_TIME, BALANCE, GEARS, RATIO, NUMBER, STEPS, DELTA_TIME, GRADE, CLIMB_STEPS }
 
@@ -415,6 +423,11 @@ object FieldFormat {
         extLabels: Map<String, String> = emptyMap(),
     ): HudCell {
         val spec = specByDataType[dataTypeId]
+        // The CLIMB stream (a hidden helper subscribed alongside GRADE) carries the distance/elevation
+        // to the top; stash its average remaining grade so the GRADE field can render "live/avg-remaining".
+        // It's Idle off-climb, which stashes null and restores the live grade alone. CLIMB has no spec,
+        // so its (discarded) cell falls through to the generic formatter.
+        if (dataTypeId == DataType.Type.CLIMB) ctx?.climbAvgRemainingGrade = climbAvgRemainingGradeOf(state)
         return if (spec != null) formatSpec(spec, state, imperial, zones, ctx, gear) else formatGeneric(dataTypeId, state, extLabels)
     }
 
@@ -470,6 +483,19 @@ object FieldFormat {
     fun gradeOf(state: StreamState): Double? {
         val dp = (state as? StreamState.Streaming)?.dataPoint ?: return null
         return dp.values[DataType.Field.ELEVATION_GRADE] ?: dp.singleValue
+    }
+
+    /**
+     * Average grade (%) over the *remaining* climb, from the [DataType.Type.CLIMB] stream's elevation
+     * and distance to the top (rise/run × 100). Null off-climb (stream Idle), or when the distance to
+     * the top isn't positive (e.g. cresting), so the GRADE field falls back to the live grade alone.
+     */
+    fun climbAvgRemainingGradeOf(state: StreamState): Double? {
+        val dp = (state as? StreamState.Streaming)?.dataPoint ?: return null
+        val toTop = dp.values[DataType.Field.DISTANCE_TO_TOP] ?: return null
+        val elevToTop = dp.values[DataType.Field.ELEVATION_TO_TOP] ?: return null
+        if (toTop <= 0.0) return null
+        return elevToTop / toTop * 100.0
     }
 
     private fun targetOf(state: StreamState): WorkoutTarget {
@@ -610,7 +636,17 @@ object FieldFormat {
             )
             // Strava ±delta vs PR/KOM (v is signed ms): ahead → green, behind → red.
             FieldKind.DELTA_TIME -> HudCell(formatDelta(v), unit, deltaColor(v), spec.icon)
-            FieldKind.GRADE -> HudCell(v?.let { "%.1f".format(it) } ?: "--", unit, HudColor.WHITE, spec.icon)
+            FieldKind.GRADE -> {
+                // On a climb, render "live/avg-remaining" (the stashed CLIMB-stream average over the
+                // rest of the climb); the live grade alone off-climb.
+                val avg = ctx?.climbAvgRemainingGrade
+                val value = when {
+                    v == null -> "--"
+                    avg != null -> "${"%.1f".format(v)}/${"%.1f".format(avg)}"
+                    else -> "%.1f".format(v)
+                }
+                HudCell(value, unit, HudColor.WHITE, spec.icon)
+            }
             FieldKind.CLIMB_STEPS -> {
                 val total = raw?.values?.get(DataType.Field.TOTAL_CLIMBS)?.toInt() ?: 0
                 val current = (raw?.values?.get(DataType.Field.CLIMB_NUMBER) ?: 0.0).toInt()
