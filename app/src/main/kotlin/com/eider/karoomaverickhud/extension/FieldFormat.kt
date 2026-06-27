@@ -501,10 +501,12 @@ object FieldFormat {
      * a "how much will this hurt" preview. Returns dashes when no climb is in range so a pinned page
      * still draws.
      */
-    fun radarCells(climb: NextClimb?, imperial: Boolean): Map<String, HudCell> = mapOf(
+    fun radarCells(climb: NextClimb?, imperial: Boolean): Map<String, HudCell> {
+        val (distValue, distDim) = formatDistance(climb?.distanceToStart, imperial)
+        return mapOf(
         RouteRadar.FIELD_DISTANCE to HudCell(
-            formatDistance(climb?.distanceToStart, imperial),
-            if (imperial) "mi" else "km",
+            distValue,
+            distDim,
             HudColor.CYAN,
             HudIcon.DISTANCE,
             iconLabel = "to climb",
@@ -524,12 +526,13 @@ object FieldFormat {
             null,
         ),
         RouteRadar.FIELD_LENGTH to HudCell(
-            formatDistance(climb?.length, imperial),
+            formatDistance(climb?.length, imperial).first,
             "long",
             HudColor.WHITE,
             null,
         ),
-    )
+        )
+    }
 
     /** Climb-gradient severity colour for the radar grade preview (green easy → red brutal). */
     private fun gradeColor(grade: Double?): HudColor = when {
@@ -601,7 +604,10 @@ object FieldFormat {
                 HudCell(value, unit, color, spec.icon)
             }
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
-            FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
+            FieldKind.DISTANCE -> {
+                val (dv, dim) = formatDistance(v, imperial)
+                HudCell(dv, distanceUnit(spec, dim), HudColor.WHITE, spec.icon)
+            }
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
             // Interval countdown led by [INTERVAL_TIME_LEAD_MS] (clamped at 0 so the last second reads
             // 0:00 instead of going negative, which formatDuration would dash). v is ms.
@@ -725,12 +731,31 @@ object FieldFormat {
         return "%.1f".format(out)
     }
 
-    private fun formatDistance(meters: Double?, imperial: Boolean): String {
-        if (meters == null) return "--"
+    /**
+     * Distance as a value plus its dimension token. Short distances are shown at finer resolution:
+     * under 1 km drops to whole metres (980m, 100m, 35m), and the imperial analog drops to whole
+     * feet under 0.1 mi. Above the threshold it reverts to km/mi — one decimal under 100, none above.
+     * The token ("m"/"km"/"ft"/"mi") is returned separately so callers fold it into their unit label.
+     */
+    private fun formatDistance(meters: Double?, imperial: Boolean): Pair<String, String> {
+        if (meters == null) return "--" to if (imperial) "mi" else "km"
+        if (imperial) {
+            val miles = meters / 1609.344
+            if (miles < 0.1) return (meters * 3.28084).roundToInt().toString() to "ft"
+            return (if (miles >= 100) "%.0f".format(miles) else "%.1f".format(miles)) to "mi"
+        }
+        if (meters < 1000.0) return meters.roundToInt().toString() to "m"
         val km = meters / 1000.0
-        val out = if (imperial) km * 0.621371 else km
-        return if (out >= 100) "%.0f".format(out) else "%.1f".format(out)
+        return (if (km >= 100) "%.0f".format(km) else "%.1f".format(km)) to "km"
     }
+
+    /**
+     * Unit label for a distance cell: a descriptive override (e.g. "to top", "seg left") stands on
+     * its own with the dimension implied by magnitude; otherwise the live dimension token plus any
+     * suffix (e.g. "m lap", "km LL").
+     */
+    private fun distanceUnit(spec: FieldSpec, dim: String): String =
+        spec.unit ?: if (spec.suffix.isEmpty()) dim else "$dim ${spec.suffix}"
 
     /**
      * The Karoo SDK emits time fields ([Field.ELAPSED_TIME] et al.) as **milliseconds** —
