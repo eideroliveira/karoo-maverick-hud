@@ -6,6 +6,7 @@ import UIKit.app.Screen
 import UIKit.app.data.Align
 import UIKit.app.data.EvsColor
 import UIKit.app.data.EvsColors
+import UIKit.app.data.PenShape
 import UIKit.app.data.TouchDirection
 import UIKit.app.resources.Font
 import UIKit.app.resources.ImgSrc
@@ -22,6 +23,7 @@ import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
+import com.eider.karoomaverickhud.extension.RadarOverlay
 import com.eider.karoomaverickhud.extension.Trajectory
 
 /**
@@ -167,14 +169,18 @@ class HudScreen : Screen(420f, 150f) {
     private val brightText = Text() // focused control item, e.g. "BRIGHTNESS  60%" / "RADAR  ON"
     private val ctrlHint = Text() // "hold: next  ·  swipe/tap: change" — how to drive the control window
 
-    // Trajectory map (shown on descents / when paged to): the heading-up route polyline, a small
-    // "you" marker at the bottom, and corner readouts for speed, grade and the current zoom.
+    // Trajectory map (a centre overlay shown on descents): the heading-up route polyline, a small
+    // "you" marker at the bottom, and a centred footer with the current grade + zoom.
     private val trajLine = Polyline()
     private val trajMarker = Polygon()
-    private val trajSpeed = Text()
-    private val trajGrade = Text()
     private val trajZoom = Text()
     private var trajMaxPoints = 0 // the Polyline's point cap, read once on first render
+
+    // Next-climb radar (a centre overlay shown when approaching a climb): a title and two compact
+    // readout lines (distance + ETA, then grade + length), all centred over the current page.
+    private val radarTitle = Text()
+    private val radarLine1 = Text()
+    private val radarLine2 = Text()
 
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
@@ -201,7 +207,7 @@ class HudScreen : Screen(420f, 150f) {
     @Volatile private var ctrlRace = false
 
     // Trajectory zoom: metres of road ahead that fill the screen. Cycled by temple-pad taps via
-    // [setTrajectoryZoom] while the trajectory page is shown.
+    // [setTrajectoryZoom] while the trajectory overlay is shown.
     @Volatile private var trajLookaheadM = 200f
 
     fun apply(next: HudSnapshot) {
@@ -223,7 +229,7 @@ class HudScreen : Screen(420f, 150f) {
         ctrlRace = raceOn
     }
 
-    /** Set how many metres of road ahead the trajectory map shows (zoom), cycled by temple-pad taps. */
+    /** Set how many metres of road ahead the trajectory overlay shows (zoom), cycled by temple-pad taps. */
     fun setTrajectoryZoom(lookaheadMeters: Float) {
         trajLookaheadM = lookaheadMeters
     }
@@ -311,36 +317,52 @@ class HudScreen : Screen(420f, 150f) {
 
         setupControlWindow()
         setupTrajectory()
+        setupRadar()
     }
 
-    /** Create the trajectory map's polyline, "you" marker and corner readouts (all hidden). */
+    /** Create the trajectory map's polyline, "you" marker and centred footer (all hidden). */
     private fun setupTrajectory() {
-        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(2).setVisibility(false)
+        // A rounded pen (and a touch more thickness) smooths the decimated turns' joins and end caps.
+        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(TRAJ_PEN).setVisibility(false)
+        trajLine.setPenShape(PenShape.round)
         add(trajLine)
         trajMarker.setForegroundColor(EvsColor.White.rgba).setPenThickness(2).setVisibility(false)
+        trajMarker.setPenShape(PenShape.round)
         add(trajMarker)
-        trajSpeed
-            .setText("")
-            .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.left)
-            .setXY(leftX, 6f)
-            .setForegroundColor(EvsColor.White.rgba)
-            .setVisibility(false)
-            .addTo(this)
-        trajGrade
-            .setText("")
-            .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.right)
-            .setXY(rightX, 6f)
-            .setForegroundColor(EvsColor.White.rgba)
-            .setVisibility(false)
-            .addTo(this)
         trajZoom
             .setText("")
             .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.left)
-            .setXY(leftX, 120f)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, TRAJ_FOOTER_Y)
             .setForegroundColor(LABEL_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+    }
+
+    /** Create the next-climb radar's centred title + two readout lines (all hidden). */
+    private fun setupRadar() {
+        radarTitle
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, 34f)
+            .setForegroundColor(CYAN_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+        radarLine1
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, 62f)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        radarLine2
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, 88f)
+            .setForegroundColor(EvsColor.White.rgba)
             .setVisibility(false)
             .addTo(this)
     }
@@ -415,6 +437,7 @@ class HudScreen : Screen(420f, 150f) {
         if (controlOpen) {
             for (i in 0 until cellCount) blankCell(i)
             hideTrajectory()
+            hideRadar()
             statusText.setText("")
             pauseDot.setText("")
             ecoText.setVisibility(false)
@@ -429,6 +452,7 @@ class HudScreen : Screen(420f, 150f) {
         if (!snap.recording && !snap.paused) {
             for (i in 0 until cellCount) blankCell(i)
             hideTrajectory()
+            hideRadar()
             statusText.setText("WAITING FOR RIDE")
             pauseDot.setText("KAROO CONNECTED")
             return
@@ -436,28 +460,30 @@ class HudScreen : Screen(420f, 150f) {
 
         statusText.setText("")
 
-        // Trajectory map page: draw the heading-up route polyline instead of data cells.
-        if (snap.pageIndex == snap.trajectoryPageIndex && snap.trajectory != null) {
-            for (i in 0 until cellCount) blankCell(i)
-            renderTrajectory(snap.trajectory!!)
-            pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
-            return
-        }
-        hideTrajectory()
-
+        // The current page's data cells (the two edge columns).
         val page: List<HudCell> = snap.pages.getOrNull(snap.pageIndex).orEmpty()
         val count = page.size.coerceIn(1, cellCount)
         if (count != layoutCount || snap.fontSize != layoutFontSize) applyLayout(count, snap.fontSize)
         for (i in 0 until cellCount) {
             if (i < count) layoutCell(i, slots[i], page.getOrNull(i), snap.showIcons) else blankCell(i)
         }
+
+        // Centre overlays, drawn over the clear centre of whatever page is shown. The descent
+        // trajectory takes precedence over the next-climb radar when both apply.
+        when {
+            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar() }
+            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory() }
+            else -> { hideTrajectory(); hideRadar() }
+        }
+
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
     }
 
     /**
-     * Draw the heading-up trajectory: the rider sits at bottom-centre looking up, so +forward maps
-     * upward and +right rightward. Metres are scaled to pixels so [trajLookaheadM] of road fills the
-     * vertical span; points beyond the zoom window (or the widget's point cap) are dropped.
+     * Draw the heading-up trajectory in the centre of the current page: the rider sits at
+     * bottom-centre looking up, so +forward maps upward and +right rightward. Metres are scaled to
+     * pixels so [trajLookaheadM] of road fills the vertical span; points beyond the zoom window (or
+     * the widget's point cap) are dropped. A centred footer carries the grade + zoom.
      */
     private fun renderTrajectory(traj: Trajectory) {
         if (trajMaxPoints == 0) trajMaxPoints = trajLine.getMaxPoints().coerceAtLeast(2)
@@ -472,7 +498,7 @@ class HudScreen : Screen(420f, 150f) {
             trajLine.add(cx + p.rightM * ppm, TRAJ_BOTTOM_Y - p.forwardM * ppm)
             added++
         }
-        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(2).setVisibility(added >= 2)
+        trajLine.setForegroundColor(CYAN_RGBA).setPenThickness(TRAJ_PEN).setVisibility(added >= 2)
 
         // "You" — a small upward triangle at the bottom-centre origin.
         trajMarker.clear()
@@ -481,25 +507,40 @@ class HudScreen : Screen(420f, 150f) {
             .addPoint(cx, TRAJ_BOTTOM_Y - 11f)
         trajMarker.setForegroundColor(EvsColor.White.rgba).setPenThickness(2).setVisibility(true)
 
-        // Corner readouts: speed (left), grade (right, tinted), zoom (bottom-left).
-        val speed = traj.overlay.getOrNull(0)
+        // Centred footer under the marker: current grade (tinted by its zone colour) + the zoom.
         val grade = traj.overlay.getOrNull(1)
-        trajSpeed.setText(overlayText(speed)).setForegroundColor(EvsColor.White.rgba).setVisibility(true)
-        trajGrade.setText(overlayText(grade)).setForegroundColor(colorRgba(grade?.color ?: HudColor.WHITE)).setVisibility(true)
-        trajZoom.setText("${trajLookaheadM.toInt()} m").setVisibility(true)
+        val gradeText = overlayText(grade)
+        val footer = if (gradeText.isBlank()) "${trajLookaheadM.toInt()} m" else "$gradeText   ${trajLookaheadM.toInt()} m"
+        trajZoom.setText(footer)
+            .setForegroundColor(colorRgba(grade?.color ?: HudColor.WHITE))
+            .setVisibility(true)
     }
 
-    /** Combine a readout cell's value and unit into one short string, e.g. "32.5 km/h". */
+    /** Draw the next-climb radar readout centred over the current page. */
+    private fun renderRadar(radar: RadarOverlay) {
+        radarTitle.setText("NEXT CLIMB").setVisibility(true)
+        radarLine1.setText("${radar.distance}   ${radar.eta}").setVisibility(true)
+        radarLine2.setText("${radar.grade}   ${radar.length}")
+            .setForegroundColor(colorRgba(radar.gradeColor))
+            .setVisibility(true)
+    }
+
+    /** Combine a readout cell's value and unit into one short string, e.g. "-6 %". */
     private fun overlayText(cell: HudCell?): String =
         if (cell == null) "" else "${cell.value} ${cell.units}".trim()
 
-    /** Hide every trajectory-map element (when not on the trajectory page). */
+    /** Hide every trajectory-overlay element (when the trajectory isn't being shown). */
     private fun hideTrajectory() {
         trajLine.setVisibility(false)
         trajMarker.setVisibility(false)
-        trajSpeed.setVisibility(false)
-        trajGrade.setVisibility(false)
         trajZoom.setVisibility(false)
+    }
+
+    /** Hide every radar-overlay element (when no climb is in range). */
+    private fun hideRadar() {
+        radarTitle.setVisibility(false)
+        radarLine1.setVisibility(false)
+        radarLine2.setVisibility(false)
     }
 
     /**
@@ -693,6 +734,11 @@ class HudScreen : Screen(420f, 150f) {
         private const val TRAJ_BOTTOM_Y = 134f
         private const val TRAJ_TOP_Y = 16f
         private const val TRAJ_SPAN_PX = TRAJ_BOTTOM_Y - TRAJ_TOP_Y
+        // A little thicker than a hairline so the route line reads clearly against the road; paired
+        // with a rounded pen shape (see setupTrajectory) for smooth joins/caps.
+        private const val TRAJ_PEN = 3
+        // Centred footer baseline (grade + zoom), just below the "you" marker (clear of the 150px edge).
+        private const val TRAJ_FOOTER_Y = 136f
     }
 
     override fun onTouch(touch: TouchDirection) {

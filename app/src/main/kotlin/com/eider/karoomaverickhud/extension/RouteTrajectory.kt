@@ -27,12 +27,6 @@ object RouteTrajectory {
     /** Decimation cap on the projected path — keeps the per-frame BLE push to the glasses light. */
     const val MAX_POINTS = 28
 
-    /** Sentinel "page id" marking the trajectory map page in a layout (not a Karoo stream). */
-    const val PAGE_MARKER = "maverick.trajectory"
-
-    /** Grade (%) at or below which the trajectory map auto-pins — a descent worth reading corners on. */
-    const val DESCENT_GRADE = -3.0
-
     private const val M_PER_DEG_LAT = 110_540.0
     private const val M_PER_DEG_LNG_EQ = 111_320.0
 
