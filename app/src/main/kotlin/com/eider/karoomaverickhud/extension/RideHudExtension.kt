@@ -347,6 +347,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 if (DataType.Type.CADENCE in streamIds && DataType.Type.POWER !in streamIds) add(DataType.Type.POWER)
                 if (DataType.Type.POWER in streamIds && DataType.Type.WORKOUT_POWER_TARGET !in streamIds) add(DataType.Type.WORKOUT_POWER_TARGET)
                 if (DataType.Type.CADENCE in streamIds && DataType.Type.WORKOUT_CADENCE_TARGET !in streamIds) add(DataType.Type.WORKOUT_CADENCE_TARGET)
+                // The GRADE field renders "live/avg-remaining" on a climb; the CLIMB stream carries the
+                // remaining distance/elevation to the top that the average needs. Idle off-climb, so it
+                // costs nothing then.
+                if (DataType.Type.ELEVATION_GRADE in streamIds && DataType.Type.CLIMB !in streamIds) add(DataType.Type.CLIMB)
             }
             val cellsFlow = if (ids.isEmpty()) {
                 flowOf(emptyMap())

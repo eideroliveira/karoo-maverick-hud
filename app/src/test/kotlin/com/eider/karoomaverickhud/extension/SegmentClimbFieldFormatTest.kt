@@ -5,6 +5,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,6 +58,73 @@ class SegmentClimbFieldFormatTest {
         )
         assertEquals("7.2", c.value)
         assertEquals("%", c.units)
+    }
+
+    // ---- climb-context grade: "live/avg-remaining" ----
+
+    /** Format the CLIMB helper stream into [ctx], then the GRADE field, returning the GRADE cell. */
+    private fun gradeOnClimb(climb: StreamState, gradeState: StreamState): HudCell {
+        val ctx = FormatContext()
+        FieldFormat.format(DataType.Type.CLIMB, climb, imperial = false, zones = zones, ctx = ctx)
+        return FieldFormat.format(DataType.Type.ELEVATION_GRADE, gradeState, imperial = false, zones = zones, ctx = ctx)
+    }
+
+    @Test
+    fun gradeShowsLiveOverAvgRemainingOnClimb() {
+        // 210 m of elevation over 1800 m to the top → 11.7% average remaining grade.
+        val c = gradeOnClimb(
+            streaming(DataType.Type.CLIMB, DataType.Field.DISTANCE_TO_TOP to 1_800.0, DataType.Field.ELEVATION_TO_TOP to 210.0),
+            streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 7.2),
+        )
+        assertEquals("7.2/11.7", c.value)
+        assertEquals("%", c.units)
+    }
+
+    @Test
+    fun gradeFallsBackToLiveWhenClimbStreamGoesIdle() {
+        // Cresting / off-climb: the CLIMB stream is Idle, so the average clears and GRADE reads live alone.
+        val c = gradeOnClimb(
+            StreamState.Idle,
+            streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 7.2),
+        )
+        assertEquals("7.2", c.value)
+    }
+
+    @Test
+    fun gradeFallsBackToLiveAtTheCrestWhenNoDistanceRemains() {
+        // Distance-to-top zero → no average (avoid div-by-zero), live grade alone.
+        val c = gradeOnClimb(
+            streaming(DataType.Type.CLIMB, DataType.Field.DISTANCE_TO_TOP to 0.0, DataType.Field.ELEVATION_TO_TOP to 0.0),
+            streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 9.0),
+        )
+        assertEquals("9.0", c.value)
+    }
+
+    @Test
+    fun gradeShowsLiveAloneWithoutClimbContext() {
+        // No FormatContext (e.g. the descent-trajectory overlay path) → live grade alone.
+        val c = cell(
+            DataType.Type.ELEVATION_GRADE,
+            streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 7.2),
+        )
+        assertEquals("7.2", c.value)
+    }
+
+    @Test
+    fun climbAvgRemainingGradeIsRiseOverRun() {
+        assertEquals(
+            11.666,
+            FieldFormat.climbAvgRemainingGradeOf(
+                streaming(DataType.Type.CLIMB, DataType.Field.DISTANCE_TO_TOP to 1_800.0, DataType.Field.ELEVATION_TO_TOP to 210.0),
+            )!!,
+            0.01,
+        )
+        assertNull(
+            FieldFormat.climbAvgRemainingGradeOf(
+                streaming(DataType.Type.CLIMB, DataType.Field.DISTANCE_TO_TOP to 0.0, DataType.Field.ELEVATION_TO_TOP to 50.0),
+            ),
+        )
+        assertNull(FieldFormat.climbAvgRemainingGradeOf(StreamState.Idle))
     }
 
     @Test
