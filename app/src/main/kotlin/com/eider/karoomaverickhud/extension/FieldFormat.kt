@@ -638,11 +638,12 @@ object FieldFormat {
             FieldKind.DELTA_TIME -> HudCell(formatDelta(v), unit, deltaColor(v), spec.icon)
             FieldKind.GRADE -> {
                 // On a climb, render "live/avg-remaining" (the stashed CLIMB-stream average over the
-                // rest of the climb); the live grade alone off-climb.
+                // rest of the climb); the live grade alone off-climb. The live grade keeps its one
+                // decimal; the average is whole-number to keep the composite compact.
                 val avg = ctx?.climbAvgRemainingGrade
                 val value = when {
                     v == null -> "--"
-                    avg != null -> "${"%.1f".format(v)}/${"%.1f".format(avg)}"
+                    avg != null -> "${"%.1f".format(v)}/${"%.0f".format(avg)}"
                     else -> "%.1f".format(v)
                 }
                 HudCell(value, unit, HudColor.WHITE, spec.icon)
