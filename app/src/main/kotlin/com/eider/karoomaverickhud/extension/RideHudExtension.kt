@@ -196,18 +196,23 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val trajSpeedFlow = karoo.streamDataFlow(DataType.Type.SPEED)
             .stateIn(scope, SharingStarted.Eagerly, StreamState.Idle)
 
-        // The heading-up trajectory to draw, or null when the map is disabled or there's no
-        // route/position to project. Re-projected on each position tick; carries a small speed+grade
-        // overlay so the map page isn't only a line.
+        // The heading-up trajectory to draw in the centre of the current page, gated by a debounced,
+        // hysteretic descent decision ([DescentGate]) so it neither flickers as the grade hovers nor
+        // vanishes the instant a descent eases: it shows after ~3 s at ≤ -2%, hides after ~3 s once
+        // the grade rises past -1%, and hides at once on a flat/positive grade. Only projects — and
+        // only churns the snapshot — while shown. Carries a small speed+grade overlay for the footer.
         val trajectoryFlow = combine(
             configFlow.map { it.trajectoryEnabled }.distinctUntilChanged(),
             routeFlow, locationFlow, gradeFlow, trajSpeedFlow,
         ) { enabled, route, loc, gradeState, speedState ->
-            if (!enabled || route == null || loc == null) {
+            TrajInputs(enabled, route, loc, gradeState, speedState)
+        }.scan(DescentGate.INITIAL to (null as Trajectory?)) { (gate, _), inp ->
+            val next = gate.advance(FieldFormat.gradeOf(inp.gradeState), System.currentTimeMillis())
+            val traj = if (!inp.enabled || !next.shown || inp.route == null || inp.loc == null) {
                 null
             } else {
                 val pts = RouteTrajectory.project(
-                    route.points, LatLng(loc.lat, loc.lng), loc.orientation, route.reversed,
+                    inp.route.points, LatLng(inp.loc.lat, inp.loc.lng), inp.loc.orientation, inp.route.reversed,
                 )
                 if (pts.size < 2) {
                     null
@@ -217,26 +222,19 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     Trajectory(
                         pts,
                         listOf(
-                            FieldFormat.format(DataType.Type.SPEED, speedState, cfg.imperial, zones),
-                            FieldFormat.format(DataType.Type.ELEVATION_GRADE, gradeState, cfg.imperial, zones),
+                            FieldFormat.format(DataType.Type.SPEED, inp.speedState, cfg.imperial, zones),
+                            FieldFormat.format(DataType.Type.ELEVATION_GRADE, inp.gradeState, cfg.imperial, zones),
                         ),
                     )
                 }
             }
-        }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, null)
-
-        // Whether the trajectory page should exist (route projectable) and whether it should auto-pin
-        // (descending). Kept off the live trajectory values so the layout only churns on these flips.
-        val trajAvailableFlow = trajectoryFlow.map { it != null }
-            .distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, false)
-        val descentActiveFlow = combine(trajectoryFlow, gradeFlow) { traj, gradeState ->
-            traj != null && (FieldFormat.gradeOf(gradeState) ?: 0.0) <= RouteTrajectory.DESCENT_GRADE
-        }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, false)
+            next to traj
+        }.map { it.second }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, null)
 
         // The climb the rider is approaching, or null when none is within the look-ahead window
-        // (~90 s out, capped at 1 km). Gated on the radar toggle so its streams cost nothing when
-        // off, and suppressed once on the climb so the on-climb page takes over cleanly. Feeds both
-        // the radar gating (via [radarActiveFlow]) and the synthetic radar cells.
+        // (~45 s out, capped at 1 km). Gated on the radar toggle so its streams cost nothing when
+        // off, and suppressed once on the climb so the on-climb page takes over cleanly. Feeds the
+        // centre radar overlay (via [FieldFormat.radarOverlay] in the pipeline tail).
         val nextClimbFlow = configFlow.map { it.radarEnabled }.distinctUntilChanged()
             .flatMapLatest { enabled ->
                 if (!enabled) {
@@ -260,20 +258,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
-        // Whether a climb is in the look-ahead window — the boolean that gates/pins the radar page.
-        // Kept separate from [nextClimbFlow] so the live (continuously changing) climb values don't
-        // churn the layout (and re-subscribe streams) every tick; only activation flips it.
-        val radarActiveFlow = nextClimbFlow.map { it != null }
-            .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, false)
-
-        // The auto-page signals collapsed into one value, so the layout combine stays within the
-        // typed-arity limit. Pin precedence (segment > climb > radar > descent-trajectory) and the
-        // trajectory-page append are applied in the builder.
-        val autoPagesFlow = combine(
-            segmentActiveFlow, climbActiveFlow, radarActiveFlow, trajAvailableFlow, descentActiveFlow,
-        ) { segment, climb, radar, trajAvailable, descent ->
-            AutoPages(segment, climb, radar, trajAvailable, descent)
+        // The auto-page gates that still create pinned pages: a live Strava segment and an on-climb.
+        // (The next-climb radar and the descent trajectory now draw as centre overlays on whatever
+        // page is shown — see the snapshot builder — so they no longer add or pin pages here.)
+        val autoPagesFlow = combine(segmentActiveFlow, climbActiveFlow) { segment, climb ->
+            AutoPages(segment, climb)
         }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, AutoPages())
 
         // Display labels for any extension-provided fields the rider added to a page (MPA, time to
@@ -282,9 +271,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         // The fields to render, as pages of data-type ids, capped to the cells the chosen row count
         // exposes. Race mode cycles only the race-flagged pages; otherwise the user's custom pages.
-        // A live workout prepends the configured workout page; a live Strava segment, an on-climb, or
-        // an approaching climb (radar) prepends its page and pins the display to it. Precedence when
-        // several apply: segment > on-climb > radar.
+        // A live workout prepends the configured workout page; a live Strava segment or an on-climb
+        // prepends its page and pins the display to it (segment > on-climb). The next-climb radar and
+        // the descent trajectory are centre overlays (see the snapshot builder), not pages.
         val layoutFlow = combine(
             configFlow, workoutActiveFlow, autoPagesFlow,
         ) { cfg, workoutActive, auto ->
@@ -304,26 +293,13 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             } else if (auto.climb && cfg.climbPage.isNotEmpty()) {
                 pinned = priority.size
                 priority.add(cfg.climbPage.take(cap))
-            } else if (auto.radar) {
-                // Radar gating already honours the toggle and on-climb suppression (see nextClimbFlow).
-                pinned = priority.size
-                priority.add(HudConfig.DEFAULT_RADAR_PAGE.take(cap))
             }
-            // The trajectory map page is appended last (so it's reachable by paging) when a route is
-            // projectable, and auto-pinned on descents unless a higher-priority page already pinned.
-            val pages = (priority + base).toMutableList()
-            var trajectoryPageIndex: Int? = null
-            if (auto.trajAvailable) {
-                trajectoryPageIndex = pages.size
-                pages.add(listOf(RouteTrajectory.PAGE_MARKER))
-                if (pinned == null && auto.descent) pinned = trajectoryPageIndex
-            }
-            Layout(pages, pinned, trajectoryPageIndex)
+            Layout(priority + base, pinned)
         }.combine(Eco.critical) { layout, critical ->
             // Critical battery: collapse to one minimal page (speed + time) to squeeze out the final
             // minutes. Overrides every priority/pinned page; the streams it needs are subscribed
             // automatically since [cellsPipeline] derives its ids from the live layout.
-            if (critical) Layout(listOf(SaverTuning.MINIMAL_PAGE), pinnedPage = null, trajectoryPageIndex = null) else layout
+            if (critical) Layout(listOf(SaverTuning.MINIMAL_PAGE), pinnedPage = null) else layout
         }.distinctUntilChanged()
 
         // Block·rep tracker for the synthetic [WorkoutBlocks.FIELD_REP] field — stateful, so it lives
@@ -363,10 +339,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             // "value/target" mid-workout even when no target field is on a page. The target
             // streams are Idle outside a workout, so the extra subscriptions cost nothing.
             val displayed = layout.pages.asSequence().flatten().distinct().toList()
-            // Synthetic radar fields and the trajectory page marker aren't Karoo streams (radar cells
-            // are injected from [nextClimbFlow]; the trajectory draws from [trajectoryFlow]) — keep
-            // them out of the subscription set.
-            val streamIds = displayed.filterNot { RouteRadar.isSynthetic(it) || WorkoutBlocks.isSynthetic(it) || it == RouteTrajectory.PAGE_MARKER }
+            // The block·rep field is synthetic (computed in [blockRepFlow], not a Karoo stream) — keep
+            // it out of the subscription set.
+            val streamIds = displayed.filterNot { WorkoutBlocks.isSynthetic(it) }
             val ids = buildList {
                 addAll(streamIds)
                 if (DataType.Type.CADENCE in streamIds && DataType.Type.POWER !in streamIds) add(DataType.Type.POWER)
@@ -389,18 +364,12 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         acc + (id to FieldFormat.format(id, state, cfg.imperial, zones, ctx, gear, extLabels))
                     }
             }
-            // Fold in the live next-climb radar cells (synthetic ids) and the trajectory map data so
-            // both ride the same sample() throttle as the stream cells. Radar cells are harmless on
-            // non-radar pages (their ids never look these up); the trajectory is attached to the
-            // snapshot only when its page exists (see the snapshot builder).
-            cellsFlow.combine(nextClimbFlow) { cells, climb ->
-                cells + FieldFormat.radarCells(climb, configFlow.value.imperial)
-            }.combine(blockRepFlow) { cells, rep ->
-                // The block·rep field is computed off the layout's own subscription; fold its synthetic
-                // cell in (when configured) so it rides the same sample() throttle as the stream cells.
-                if (rep != null) cells + (WorkoutBlocks.FIELD_REP to WorkoutBlocks.cell(rep)) else cells
-            }.combine(trajectoryFlow) { cells, traj ->
-                Triple(layout, cells, traj)
+            // Fold the block·rep field (synthetic) into the cells, then bundle the centre-overlay data
+            // — the descent trajectory and the next-climb radar — into one frame so all of it rides
+            // the same sample() throttle as the stream cells.
+            combine(cellsFlow, blockRepFlow, trajectoryFlow, nextClimbFlow) { cells, rep, traj, climb ->
+                val withRep = if (rep != null) cells + (WorkoutBlocks.FIELD_REP to WorkoutBlocks.cell(rep)) else cells
+                Frame(layout, withRep, traj, FieldFormat.radarOverlay(climb, configFlow.value.imperial))
             }
         }
 
@@ -422,36 +391,43 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         }.distinctUntilChanged()
 
         refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) }
-            .combine(rideStateFlow) { (layout, cells, traj), ride ->
+            .combine(rideStateFlow) { frame, ride ->
                 HudSnapshot(
-                    pages = layout.pages.map { page -> page.map { id -> cells[id] ?: HudCell.blank(id) } },
+                    pages = frame.layout.pages.map { page -> page.map { id -> frame.cells[id] ?: HudCell.blank(id) } },
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
-                    pinnedPage = layout.pinnedPage,
+                    pinnedPage = frame.layout.pinnedPage,
                     rows = configFlow.value.rows,
                     clock = if (configFlow.value.showClock) currentClock() else "",
                     showIcons = configFlow.value.showIcons,
                     fontSize = configFlow.value.hudFontSize,
                     // battery (glasses %) is stamped by MaverickBridge, which owns the Evs link.
-                    // Trajectory rides along only when its page exists in this layout.
-                    trajectory = layout.trajectoryPageIndex?.let { traj },
-                    trajectoryPageIndex = layout.trajectoryPageIndex,
+                    // The trajectory + radar centre overlays ride along on whatever page is shown.
+                    trajectory = frame.trajectory,
+                    radar = frame.radar,
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
     }
 
-    /**
-     * A computed page layout: the pages to show, an optional page to pin (segment/climb/radar/
-     * descent-trajectory), and the index of the trajectory map page (which the glasses draw as
-     * graphics rather than cells), if present.
-     */
+    /** A computed page layout: the pages to show and an optional page to pin (segment/climb). */
     private data class Layout(
         val pages: List<List<String>>,
         val pinnedPage: Int?,
-        val trajectoryPageIndex: Int? = null,
+    )
+
+    /**
+     * One throttled frame handed to the snapshot builder: the page [layout] + resolved [cells], plus
+     * the two centre overlays — the descent [trajectory] and the next-climb [radar] — each null when
+     * not active.
+     */
+    private data class Frame(
+        val layout: Layout,
+        val cells: Map<String, HudCell>,
+        val trajectory: Trajectory?,
+        val radar: RadarOverlay?,
     )
 
     /** The loaded route: climbs + total length (radar) and the decoded path geometry (trajectory map). */
@@ -462,16 +438,22 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val reversed: Boolean,
     )
 
+    /** Per-tick inputs to the trajectory's descent gate + projection (combined before the gate scan). */
+    private data class TrajInputs(
+        val enabled: Boolean,
+        val route: RouteInfo?,
+        val loc: OnLocationChanged?,
+        val gradeState: StreamState,
+        val speedState: StreamState,
+    )
+
     /**
-     * Which auto-page signals currently apply. Pin precedence (segment > climb > radar >
-     * descent-trajectory) and the trajectory-page append are applied in the layout builder.
+     * Which page-creating auto-page signals currently apply (segment > on-climb in the builder). The
+     * radar and descent trajectory are centre overlays, not pages, so they're not tracked here.
      */
     private data class AutoPages(
         val segment: Boolean = false,
         val climb: Boolean = false,
-        val radar: Boolean = false,
-        val trajAvailable: Boolean = false,
-        val descent: Boolean = false,
     )
 
     /** Current time of day as "HH:mm" from the Karoo's clock, for the HUD's top-left corner. */

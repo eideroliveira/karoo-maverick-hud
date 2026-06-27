@@ -14,7 +14,6 @@ import com.eider.karoomaverickhud.extension.DEFAULT_POWER_ZONES
 import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.MAX_ROWS
 import com.eider.karoomaverickhud.extension.MIN_ROWS
-import com.eider.karoomaverickhud.extension.RouteRadar
 import com.eider.karoomaverickhud.extension.ZoneBand
 import io.hammerhead.karooext.models.DataType
 import kotlinx.coroutines.flow.Flow
@@ -165,23 +164,6 @@ data class HudConfig(
             DataType.Type.VERTICAL_SPEED,
             DataType.Type.DISTANCE_TO_TOP,
             DataType.Type.ELEVATION_TO_TOP,
-        )
-
-        /**
-         * Seeded next-climb radar page, shown and pinned as the rider approaches a climb on a loaded
-         * route (gated on [HudConfig.radarEnabled]). Live power/cadence stay real Karoo streams (so
-         * they keep zone colouring); distance/grade/eta/length are synthetic [RouteRadar] fields.
-         * Slot order TL-TR-BL-BR-ML-MR (lens columns draw 0-4-2 / 1-5-3): left = power, eta, cadence;
-         * right = distance-to-climb, length, grade. The 4-cell (2-row) layout keeps the corners —
-         * power, distance, cadence, grade — and drops eta & length.
-         */
-        val DEFAULT_RADAR_PAGE: List<String> = listOf(
-            DataType.Type.POWER,
-            RouteRadar.FIELD_DISTANCE,
-            DataType.Type.CADENCE,
-            RouteRadar.FIELD_GRADE,
-            RouteRadar.FIELD_ETA,
-            RouteRadar.FIELD_LENGTH,
         )
 
         val DEFAULT = HudConfig(

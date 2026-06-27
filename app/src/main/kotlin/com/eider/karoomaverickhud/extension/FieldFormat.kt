@@ -306,15 +306,16 @@ data class HudSnapshot(
     /** Whether battery-saver ("ECO") is engaged — drives the top-left ECO badge on the glasses. */
     val eco: Boolean = false,
     /**
-     * Heading-up route trajectory to draw when the trajectory map page is shown (chiefly on
-     * descents, to read curves ahead). Null when there's no route/position to project.
+     * Heading-up route trajectory to draw in the centre of the current page (chiefly on descents, to
+     * read curves ahead). Non-null only while descending on a projectable route; null otherwise.
      */
     val trajectory: Trajectory? = null,
     /**
-     * Index in [pages] of the trajectory map page. When [pageIndex] equals it (and [trajectory] is
-     * present) the glasses draw the polyline map instead of data cells. Null = no trajectory page.
+     * Next-climb radar readout to draw in the centre of the current page as the rider approaches a
+     * climb; null when no climb is in range. Mutually exclusive with [trajectory] at render time
+     * (the descending trajectory takes precedence).
      */
-    val trajectoryPageIndex: Int? = null,
+    val radar: RadarOverlay? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
@@ -329,6 +330,18 @@ data class HudSnapshot(
 data class Trajectory(
     val points: List<MetersPoint>,
     val overlay: List<HudCell>,
+)
+
+/**
+ * Compact next-climb radar readout for the centre overlay: pre-formatted strings plus the grade's
+ * severity colour. Built by [FieldFormat.radarOverlay]; null = no climb in range (overlay hidden).
+ */
+data class RadarOverlay(
+    val distance: String,
+    val eta: String,
+    val grade: String,
+    val length: String,
+    val gradeColor: HudColor,
 )
 
 object FieldFormat {
@@ -495,42 +508,22 @@ object FieldFormat {
     }
 
     /**
-     * Synthetic cells for the next-climb radar page, rendered from the computed [NextClimb] rather
-     * than a Karoo stream (the extension injects this map into the cell lookup and keeps these ids
-     * out of subscription). Distances honour the imperial setting; grade is coloured by severity as
-     * a "how much will this hurt" preview. Returns dashes when no climb is in range so a pinned page
-     * still draws.
+     * Compact next-climb readout for the centre overlay, built from the computed [NextClimb] rather
+     * than a Karoo stream: distance to the ramp, ETA, average grade and length. Distances honour the
+     * imperial setting; the grade carries its severity colour ("how much will this hurt"). Null when
+     * no climb is in range, so the overlay simply doesn't draw.
      */
-    fun radarCells(climb: NextClimb?, imperial: Boolean): Map<String, HudCell> {
-        val (distValue, distDim) = formatDistance(climb?.distanceToStart, imperial)
-        return mapOf(
-        RouteRadar.FIELD_DISTANCE to HudCell(
-            distValue,
-            distDim,
-            HudColor.CYAN,
-            HudIcon.DISTANCE,
-            iconLabel = "to climb",
-        ),
-        RouteRadar.FIELD_ETA to HudCell(
+    fun radarOverlay(climb: NextClimb?, imperial: Boolean): RadarOverlay? {
+        if (climb == null) return null
+        val (distValue, distDim) = formatDistance(climb.distanceToStart, imperial)
+        val (lenValue, lenDim) = formatDistance(climb.length, imperial)
+        return RadarOverlay(
+            distance = "$distValue $distDim",
             // formatDuration expects milliseconds (see its note); ETA is seconds.
-            formatDuration(climb?.etaSeconds?.let { it * 1000.0 }),
-            "eta",
-            HudColor.WHITE,
-            HudIcon.TIME,
-            iconLabel = "eta",
-        ),
-        RouteRadar.FIELD_GRADE to HudCell(
-            climb?.grade?.let { "%.0f".format(it) } ?: "--",
-            "%",
-            gradeColor(climb?.grade),
-            null,
-        ),
-        RouteRadar.FIELD_LENGTH to HudCell(
-            formatDistance(climb?.length, imperial).first,
-            "long",
-            HudColor.WHITE,
-            null,
-        ),
+            eta = formatDuration(climb.etaSeconds * 1000.0),
+            grade = "${"%.0f".format(climb.grade)}%",
+            length = "$lenValue $lenDim",
+            gradeColor = gradeColor(climb.grade),
         )
     }
 

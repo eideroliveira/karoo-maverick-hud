@@ -395,16 +395,13 @@ class MaverickBridge(
             TouchDirection.longTap -> toggleControl()
             TouchDirection.forward -> changePage(+1)
             TouchDirection.backward -> changePage(-1)
-            TouchDirection.tap -> if (onTrajectoryPage()) cycleTrajectoryZoom()
+            TouchDirection.tap -> if (trajectoryShowing()) cycleTrajectoryZoom()
             else -> {}
         }
     }
 
-    /** Whether the currently shown page is the trajectory map (so a tap means "change zoom"). */
-    private fun onTrajectoryPage(): Boolean {
-        val idx = lastSnapshot.trajectoryPageIndex ?: return false
-        return pageIndex == idx
-    }
+    /** Whether the trajectory map is currently drawn (centre overlay), so a tap means "change zoom". */
+    private fun trajectoryShowing(): Boolean = lastSnapshot.trajectory != null
 
     /**
      * Step the trajectory zoom to the next look-ahead distance. The screen reads the zoom live and

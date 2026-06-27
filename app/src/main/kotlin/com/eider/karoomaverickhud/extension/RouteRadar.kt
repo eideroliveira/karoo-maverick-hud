@@ -5,33 +5,23 @@ import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.StreamState
 
 /**
- * Next-climb radar — a look-ahead auto-page that pins the HUD as the rider approaches a climb on a
- * loaded route, then hands off to the on-climb page once they hit the ramp. It answers "what's
- * coming and when": distance to the climb, ETA, average grade and length.
+ * Next-climb radar — a look-ahead that surfaces a compact climb preview in the centre of whatever
+ * page is showing as the rider approaches a climb on a loaded route, then steps aside once they hit
+ * the ramp (the on-climb page takes over). It answers "what's coming and when": distance to the
+ * climb, ETA, average grade and length.
  *
  * The climb shapes come from the route's [OnNavigationState.NavigationState.NavigatingRoute.climbs]
  * (SDK 1.1.6+). Position along the route is derived from
  * [DataType.Type.DISTANCE_TO_DESTINATION] (`routeDistance − distanceToDestination`), and the ETA
- * from live [DataType.Type.SPEED]. The values are synthetic (not Karoo streams), so the extension
- * injects them into the cell map and keeps their ids out of stream subscription.
+ * from live [DataType.Type.SPEED]. The readout is rendered as a centre overlay (see
+ * [FieldFormat.radarOverlay]) rather than as page cells.
  *
  * Only [NavigationState.NavigatingRoute] is handled — navigating to a free POI destination carries
  * climbs but no total route distance to anchor progress against, so that case is left for later.
  */
 object RouteRadar {
-    /** Synthetic field ids for the radar page (rendered by [FieldFormat.radarCells], never streamed). */
-    const val FIELD_DISTANCE = "maverick.radar.distance"
-    const val FIELD_ETA = "maverick.radar.eta"
-    const val FIELD_GRADE = "maverick.radar.grade"
-    const val FIELD_LENGTH = "maverick.radar.length"
-
-    private const val PREFIX = "maverick.radar."
-
-    /** Whether an id is a synthetic radar field (so the pipeline injects it rather than subscribing). */
-    fun isSynthetic(id: String): Boolean = id.startsWith(PREFIX)
-
-    /** Pin when ~90 s from the climb at current speed, but never further out than 1 km. */
-    const val LOOKAHEAD_SECONDS = 90.0
+    /** Show when ~45 s from the climb at current speed, but never further out than 1 km. */
+    const val LOOKAHEAD_SECONDS = 45.0
     const val LOOKAHEAD_CAP_METERS = 1_000.0
 
     /** Speed floor (m/s) so a near-stop doesn't blow the look-ahead window or ETA up to silly values. */
