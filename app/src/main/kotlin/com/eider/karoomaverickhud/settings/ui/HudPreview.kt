@@ -8,6 +8,9 @@ package com.eider.karoomaverickhud.settings.ui
 
 import com.eider.karoomaverickhud.extension.FieldFormat
 import com.eider.karoomaverickhud.extension.HudFontSize
+import com.eider.karoomaverickhud.extension.NextClimb
+import com.eider.karoomaverickhud.extension.cellsForRows
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +41,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.text.font.FontWeight
@@ -46,10 +53,46 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.eider.karoomaverickhud.settings.HudConfig
+import kotlin.math.sin
 import kotlin.random.Random
 
 /** Demo value for a field: the string the lens shows + the numeric used for zone coloring. */
 data class DemoVal(val display: String, val numeric: Double?)
+
+/** The centre overlay a preview scene draws over the page's clear centre (mirrors HudScreen). */
+enum class PreviewOverlay { NONE, RADAR, TRAJECTORY }
+
+/**
+ * One scene the hub's live preview cycles through: a data page ([fields]) plus an optional centre
+ * [overlay]. Beyond the rider's numbered pages, the preview tours the route layouts the glasses raise
+ * on a ride — the on-climb page, and the next-climb radar / heading-up trajectory overlays (which the
+ * glasses draw over the clear centre of whatever page is showing), so the rider sees each beforehand.
+ */
+data class PreviewScene(
+    /** Short caption shown under the lens (e.g. "PAGE 1", "CLIMB", "NEXT-CLIMB RADAR"). */
+    val label: String,
+    /** The page's field ids, rendered as the two edge columns of cells. */
+    val fields: List<String>,
+    /** The centre overlay drawn over the cells, if any. */
+    val overlay: PreviewOverlay = PreviewOverlay.NONE,
+)
+
+/**
+ * The scenes the hub preview cycles through: the rider's numbered pages, then the on-climb auto-page
+ * and — when enabled — the next-climb radar and the trajectory map. Radar/trajectory are centre
+ * overlays the glasses draw over the current page, so the preview shows them over the first page,
+ * exactly as they appear mid-ride. A faithful tour of every layout the rider can meet.
+ */
+fun previewScenes(cfg: HudConfig): List<PreviewScene> {
+    val cap = cellsForRows(cfg.rows)
+    val base = cfg.pages.firstOrNull()?.take(cap) ?: cfg.climbPage.take(cap)
+    return buildList {
+        cfg.pages.forEachIndexed { i, p -> add(PreviewScene("PAGE ${i + 1}", p.take(cap))) }
+        add(PreviewScene("CLIMB", cfg.climbPage.take(cap)))
+        if (cfg.radarEnabled) add(PreviewScene("NEXT-CLIMB RADAR", base, PreviewOverlay.RADAR))
+        if (cfg.trajectoryEnabled) add(PreviewScene("TRAJECTORY", base, PreviewOverlay.TRAJECTORY))
+    }
+}
 
 /** Column index order (left, right) for a given field count — mirrors hudpreview.columnOrder. */
 fun columnOrder(count: Int): Pair<List<Int>, List<Int>> = when (count.coerceAtMost(6)) {
@@ -217,38 +260,27 @@ private fun LensBox(width: Dp, lensHeight: Dp = 150.dp, content: @Composable Box
 @Composable
 fun GlassesPreview(
     cfg: HudConfig,
-    page: List<String>,
+    scene: PreviewScene,
     values: Map<String, DemoVal>,
     pageIndex: Int,
     totalPages: Int,
     width: Dp = 448.dp,
     onTap: (() -> Unit)? = null,
 ) {
-    val big = page.size <= 4
-    // The lens is a FIXED size regardless of field count. The glasses screen doesn't resize per
-    // page, and the hub preview auto-cycles pages with different field counts — a height that
-    // flipped between them would make the box jump on every cycle. Sized tall enough for the worst
-    // case (three rows of the side-by-side 42sp value) plus room for the page dots; ≤4-field pages
-    // keep the same box and just spread their cells toward the corners (SpaceBetween), which is how
-    // the real HUD places them anyway. [big] now only picks the per-cell layout/font, not the size.
+    // The lens is a FIXED size regardless of scene. The glasses screen doesn't resize per page, and
+    // the hub preview auto-cycles scenes with different field counts (and the drawn trajectory map) —
+    // a height that flipped between them would make the box jump on every cycle. Sized tall enough
+    // for the worst case (three rows of the side-by-side 42sp value) plus room for the page dots.
     val lensH = 208.dp
     val colH = 172.dp
-    val (left, right) = columnOrder(page.size)
     LensBox(width, lensHeight = lensH) {
-        // centre fixation dot
-        Box(Modifier.align(Alignment.Center).size(6.dp).clip(RoundedCornerShape(3.dp))
-            .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(3.dp)))
-        Row(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.height(colH)) {
-                left.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = false, big = big) }
-            }
-            Column(verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End,
-                modifier = Modifier.height(colH)) {
-                right.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = true, big = big) }
-            }
+        // The page cells always draw the two edge columns; radar / trajectory are centre overlays the
+        // glasses paint over the clear middle, so they sit on top of the cells (as on the Maverick).
+        PageCells(cfg, scene.fields, values, colH, showCenterDot = scene.overlay == PreviewOverlay.NONE)
+        when (scene.overlay) {
+            PreviewOverlay.RADAR -> RadarOverlayCells(cfg)
+            PreviewOverlay.TRAJECTORY -> TrajectoryOverlayCells()
+            PreviewOverlay.NONE -> {}
         }
         if (totalPages > 1) {
             Row(
@@ -266,6 +298,103 @@ fun GlassesPreview(
             Box(Modifier.matchParentSize().clickable(remember { MutableInteractionSource() }, indication = null, onClick = onTap))
         }
     }
+}
+
+/** A data page (numbered or climb): the centre fixation dot + the two edge columns of cells. */
+@Composable
+private fun BoxScope.PageCells(
+    cfg: HudConfig,
+    page: List<String>,
+    values: Map<String, DemoVal>,
+    colH: Dp,
+    showCenterDot: Boolean = true,
+) {
+    val big = page.size <= 4
+    val (left, right) = columnOrder(page.size)
+    // centre fixation dot — suppressed when a centre overlay (radar / trajectory) takes the middle.
+    if (showCenterDot) {
+        Box(Modifier.align(Alignment.Center).size(6.dp).clip(RoundedCornerShape(3.dp))
+            .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(3.dp)))
+    }
+    Row(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.height(colH)) {
+            left.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = false, big = big) }
+        }
+        Column(verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.End,
+            modifier = Modifier.height(colH)) {
+            right.forEach { i -> LensCell(page.getOrNull(i), values, cfg, right = true, big = big) }
+        }
+    }
+}
+
+/**
+ * The next-climb radar centre overlay, mirroring HudScreen.renderRadar: a cyan "NEXT CLIMB" title and
+ * two centred readout lines (distance + ETA, then grade + length), the grade line tinted by climb
+ * severity. A representative demo climb runs through the real [FieldFormat.radarOverlay] so the
+ * strings (and imperial units) read exactly like the glasses.
+ */
+@Composable
+private fun BoxScope.RadarOverlayCells(cfg: HudConfig) {
+    val demo = NextClimb(distanceToStart = 800.0, etaSeconds = 72.0, grade = 8.0, length = 1200.0, totalElevation = 96.0)
+    val radar = FieldFormat.radarOverlay(demo, cfg.imperial) ?: return
+    Column(
+        Modifier.align(Alignment.Center),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        KText("NEXT CLIMB", color = K.zCyan, size = 16.sp, weight = FontWeight.Bold,
+            family = CondFamily, letterSpacing = 1.sp, maxLines = 1, softWrap = false)
+        KText("${radar.distance}   ${radar.eta}", color = K.zWhite, size = 20.sp,
+            weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+        KText("${radar.grade}   ${radar.length}", color = radar.gradeColor.toComposeColor(),
+            size = 20.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+    }
+}
+
+/**
+ * The heading-up trajectory centre overlay, mirroring HudScreen.renderTrajectory: the rider sits at
+ * bottom-centre looking up, with a cyan road bending ahead, a white "you" triangle at the origin, and
+ * a centred footer carrying grade + zoom. The road is a demo S-curve so the preview conveys the
+ * layout without a live route — the on-glasses map projects the real polyline.
+ */
+@Composable
+private fun BoxScope.TrajectoryOverlayCells() {
+    Canvas(Modifier.matchParentSize()) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val bottomY = h * 0.89f  // TRAJ_BOTTOM_Y (134/150)
+        val topY = h * 0.107f    // TRAJ_TOP_Y (16/150)
+        val span = bottomY - topY
+        val amp = w * 0.16f
+        val n = 26
+        val road = Path()
+        for (i in 0..n) {
+            val f = i / n.toFloat()
+            val y = bottomY - f * span
+            // gentle S-bend that grows with distance for a sense of perspective — reads as a road
+            val bend = sin(f * 3.6f) * (0.4f + 0.6f * f)
+            val x = cx + bend * amp
+            if (i == 0) road.moveTo(x, y) else road.lineTo(x, y)
+        }
+        drawPath(road, color = K.zCyan,
+            style = Stroke(width = w * 0.013f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // "You" — a small upward triangle at the bottom-centre origin.
+        val marker = Path().apply {
+            moveTo(cx - w * 0.012f, bottomY)
+            lineTo(cx + w * 0.012f, bottomY)
+            lineTo(cx, bottomY - h * 0.075f)
+            close()
+        }
+        drawPath(marker, color = K.zWhite)
+    }
+    // Centred footer under the marker: current grade + zoom, exactly as the glasses render it.
+    KText("-6 %   200 m", color = K.zWhite, size = 14.sp, weight = FontWeight.SemiBold,
+        family = CondFamily, maxLines = 1, softWrap = false,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
 }
 
 /**
