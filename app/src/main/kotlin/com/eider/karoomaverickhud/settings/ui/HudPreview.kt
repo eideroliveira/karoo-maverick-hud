@@ -165,7 +165,7 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val labelOrIcon: @Composable () -> Unit = {
         if (showIcon) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                KIcon(field?.icon ?: "bolt", 12.dp, Lens.label, stroke = 2.4f)
+                KIcon(field?.icon ?: "bolt", 12.dp, Lens.icon, stroke = 2.4f)
                 if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 13.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
             }
         } else {
@@ -360,7 +360,7 @@ private fun EditSlot(
             val labelOrIcon: @Composable () -> Unit = {
                 if (showIcon) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
-                        KIcon(field.icon, 8.dp, Lens.label, stroke = 2.4f)
+                        KIcon(field.icon, 8.dp, Lens.icon, stroke = 2.4f)
                         if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 8.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
                     }
                 } else {
