@@ -63,8 +63,9 @@ data class HudConfig(
      */
     val segmentPage: List<String>,
     /**
-     * The climb page's fields — shown and pinned automatically while on a climb when no Strava
-     * segment is running. Editable like the workout page; doesn't render off a climb.
+     * Legacy climb-page fields. The on-climb readout is now a centre overlay (a fixed summary +
+     * grade-coloured profile, gated by [radarEnabled]; see [RouteRadar]/`ClimbProfile`), so this
+     * page is no longer shown or editable. Retained only so existing preferences still deserialize.
      */
     val climbPage: List<String>,
     /** Rows of fields per glasses column (2 or 3); each page holds 2 columns × this many. */
@@ -93,9 +94,11 @@ data class HudConfig(
     /** Glasses battery % at or below which saver auto-engages (shown as "ECO (auto)"). */
     val saverThresholdPct: Int,
     /**
-     * Whether the next-climb radar look-ahead is active. When on (and a route with climbs is
-     * loaded), the HUD pins a brief preview page — distance/ETA/grade/length — as the rider nears a
-     * climb, then hands off to the on-climb page at the ramp. See [RouteRadar].
+     * Whether the climb radar & profile overlays are active. When on (and a route with climbs is
+     * loaded), the HUD draws a brief next-climb preview — distance/ETA/grade/length — over the centre
+     * as the rider nears a climb, then switches to the on-climb overlay (live grade/avg, vertical &
+     * horizontal remaining, MPA, and a grade-coloured elevation profile) at the ramp. One switch
+     * covers both. See [RouteRadar] / `ClimbProfile`.
      */
     val radarEnabled: Boolean,
     /**
@@ -106,8 +109,9 @@ data class HudConfig(
     val trajectoryEnabled: Boolean,
     /**
      * Race mode. When on, only the race-flagged numbered pages (see [racePages]) plus the dynamic
-     * auto-pages (workout/segment/climb/radar/trajectory) are shown, and paging auto-cycles
-     * regardless of [pageMode] — a hands-off layout for racing. See [raceBasePages].
+     * auto-pages (workout/segment) and centre overlays (climb radar/profile, trajectory) are shown,
+     * and paging auto-cycles regardless of [pageMode] — a hands-off layout for racing. See
+     * [raceBasePages].
      */
     val raceMode: Boolean,
     /**

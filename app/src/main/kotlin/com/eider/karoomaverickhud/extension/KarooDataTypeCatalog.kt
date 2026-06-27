@@ -60,6 +60,21 @@ object KarooDataTypeCatalog {
     fun labels(context: Context): Map<String, String> =
         discover(context).associate { it.id to it.label }
 
+    /**
+     * The data-type id of an installed MPA (Maximal Power Available, e.g. Xert) extension field,
+     * matched by display label, or null when no such field is installed. Lets the on-climb overlay
+     * surface MPA without the rider having to add it to a page. Prefers an exact "MPA" label, then
+     * any field whose label mentions MPA / maximal power available.
+     */
+    fun mpaDataTypeId(context: Context): String? {
+        val fields = discover(context)
+        fields.firstOrNull { it.label.trim().equals("MPA", ignoreCase = true) }?.let { return it.id }
+        return fields.firstOrNull {
+            val l = it.label.lowercase()
+            l.contains("mpa") || l.contains("maximal power") || l.contains("max power available")
+        }?.id
+    }
+
     private fun parseExtension(parser: XmlResourceParser, res: Resources, out: MutableList<DiscoveredField>) {
         var extId: String? = null
         var extName: String? = null

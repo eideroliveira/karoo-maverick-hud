@@ -242,7 +242,7 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.SEGMENT_PR, "PR", FieldKind.TIME, HudIcon.TIME, unit = "PR", valueField = DataType.Field.SEGMENT_PR_TIME),
     FieldSpec(DataType.Type.SEGMENT_DISTANCE_REMAINING, "SEG DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "seg left", valueField = DataType.Field.SEGMENT_DISTANCE_REMAINING),
     FieldSpec(DataType.Type.SEGMENT_ELEVATION_REMAINING, "SEG ELEV", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m seg", valueField = DataType.Field.SEGMENT_ELEVATION_REMAINING),
-    // ---- climb (shown on the auto climb page while on a climb, when no segment is running) ----
+    // ---- climb metrics (pickable for any page; also feed the on-climb centre overlay) ----
     FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.GRADE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
     FieldSpec(DataType.Type.VERTICAL_SPEED, "VAM", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "VAM", valueField = DataType.Field.VERTICAL_SPEED),
     FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.TOP, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
@@ -316,6 +316,13 @@ data class HudSnapshot(
      * (the descending trajectory takes precedence).
      */
     val radar: RadarOverlay? = null,
+    /**
+     * On-climb readout to draw in the centre of the current page while the rider is on a climb —
+     * the live summary plus a grade-coloured elevation profile. Null off a climb. Drawn in place of
+     * the next-climb [radar] (you're either approaching a climb or on it) and below the descent
+     * [trajectory] in render precedence.
+     */
+    val climb: ClimbOverlay? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
@@ -342,6 +349,31 @@ data class RadarOverlay(
     val grade: String,
     val length: String,
     val gradeColor: HudColor,
+)
+
+/**
+ * On-climb centre overlay: the live climb summary plus a grade-coloured elevation silhouette.
+ * Pre-formatted strings (distances honour the imperial setting) so the renderer just places them:
+ *  - [mpa]       Maximal Power Available (Xert extension), e.g. "320 W", or null when no MPA field
+ *                is installed — the slot is then omitted.
+ *  - [toTop]     vertical metres of ascent still to the summit.
+ *  - [toEnd]     horizontal distance still to the end of the climb.
+ *  - [grade] / [avgGrade]  the current grade over the average grade still to climb, each with its
+ *                severity colour ([gradeColor]/[avgGradeColor]).
+ *  - [climbLabel]  "CLIMB n/total" when the route exposes the climb index, else "CLIMB".
+ *  - [profile]   the filled, grade-coloured silhouette (null when no route elevation is available).
+ * Built by [FieldFormat.climbOverlay]; null when not on a climb (the overlay then doesn't draw).
+ */
+data class ClimbOverlay(
+    val mpa: String?,
+    val toTop: String,
+    val toEnd: String,
+    val grade: String,
+    val gradeColor: HudColor,
+    val avgGrade: String,
+    val avgGradeColor: HudColor,
+    val climbLabel: String,
+    val profile: ClimbProfileData?,
 )
 
 object FieldFormat {
@@ -456,8 +488,8 @@ object FieldFormat {
 
     /**
      * Whether the rider is on a climb, from the [DataType.Type.CLIMB] stream — distance/elevation to
-     * the top only stream positive while on a climb. Gates and pins the climb page (which only
-     * appears when no segment is running).
+     * the top only stream positive while on a climb. Used to hand off from the next-climb preview to
+     * the on-climb overlay (see [climbOverlay]); both ride the radar toggle.
      */
     fun climbActive(state: StreamState): Boolean {
         val dp = (state as? StreamState.Streaming)?.dataPoint ?: return false
@@ -523,17 +555,52 @@ object FieldFormat {
             eta = formatDuration(climb.etaSeconds * 1000.0),
             grade = "${"%.0f".format(climb.grade)}%",
             length = "$lenValue $lenDim",
-            gradeColor = gradeColor(climb.grade),
+            gradeColor = ClimbProfile.gradeColor(climb.grade),
         )
     }
 
-    /** Climb-gradient severity colour for the radar grade preview (green easy → red brutal). */
-    private fun gradeColor(grade: Double?): HudColor = when {
-        grade == null -> HudColor.WHITE
-        grade < 4.0 -> HudColor.GREEN
-        grade < 7.0 -> HudColor.YELLOW
-        grade < 10.0 -> HudColor.ORANGE
-        else -> HudColor.RED
+    /**
+     * On-climb overlay from the live CLIMB composite stream (vertical/horizontal remaining + the
+     * climb index), the live grade, an optional MPA reading, and a pre-built [profile]. Returns null
+     * when the CLIMB stream says we're not on a climb, so the overlay simply doesn't draw.
+     *
+     * "To top" is the *vertical* ascent remaining ([DataType.Field.ELEVATION_TO_TOP]); "to end" is the
+     * *horizontal* distance remaining ([DataType.Field.DISTANCE_TO_TOP]); the average grade still to
+     * climb is the ratio of the two.
+     */
+    fun climbOverlay(
+        climbState: StreamState,
+        gradeState: StreamState,
+        mpaWatts: Double?,
+        profile: ClimbProfileData?,
+        imperial: Boolean,
+    ): ClimbOverlay? {
+        val dp = (climbState as? StreamState.Streaming)?.dataPoint ?: return null
+        val toEndM = dp.values[DataType.Field.DISTANCE_TO_TOP] ?: 0.0     // horizontal, m of road
+        val toTopM = dp.values[DataType.Field.ELEVATION_TO_TOP] ?: 0.0    // vertical, m of ascent
+        if (toEndM <= 0.0 && toTopM <= 0.0) return null                  // not on a climb
+
+        val grade = gradeOf(gradeState)
+        val avg = if (toEndM > 0.0) toTopM / toEndM * 100.0 else null
+        val (endValue, endDim) = formatDistance(toEndM, imperial)
+        val current = dp.values[DataType.Field.CLIMB_NUMBER]?.toInt() ?: 0
+        val total = dp.values[DataType.Field.TOTAL_CLIMBS]?.toInt() ?: 0
+        val label = when {
+            total > 0 -> "CLIMB $current/$total"
+            current > 0 -> "CLIMB $current"
+            else -> "CLIMB"
+        }
+        return ClimbOverlay(
+            mpa = mpaWatts?.takeIf { it > 0 }?.let { "${it.roundToInt()} W" },
+            toTop = "${toTopM.roundToInt()} m",
+            toEnd = "$endValue $endDim",
+            grade = grade?.let { "%.1f".format(it) } ?: "--",
+            gradeColor = grade?.let { ClimbProfile.gradeColor(it) } ?: HudColor.WHITE,
+            avgGrade = avg?.let { "%.1f".format(it) } ?: "--",
+            avgGradeColor = avg?.let { ClimbProfile.gradeColor(it) } ?: HudColor.WHITE,
+            climbLabel = label,
+            profile = profile,
+        )
     }
 
     /**
