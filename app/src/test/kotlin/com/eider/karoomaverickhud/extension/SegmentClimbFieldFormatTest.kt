@@ -71,12 +71,12 @@ class SegmentClimbFieldFormatTest {
 
     @Test
     fun gradeShowsLiveOverAvgRemainingOnClimb() {
-        // 210 m of elevation over 1800 m to the top → 11.7% average remaining grade.
+        // 210 m of elevation over 1800 m to the top → 11.7% average, rendered whole as "12".
         val c = gradeOnClimb(
             streaming(DataType.Type.CLIMB, DataType.Field.DISTANCE_TO_TOP to 1_800.0, DataType.Field.ELEVATION_TO_TOP to 210.0),
             streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 7.2),
         )
-        assertEquals("7.2/11.7", c.value)
+        assertEquals("7.2/12", c.value)
         assertEquals("%", c.units)
     }
 
