@@ -82,7 +82,7 @@ data class HudConfig(
     val showClock: Boolean,
     /** Whether the glasses draw each data field's icon next to its unit/label. */
     val showIcons: Boolean,
-    /** Glasses value font size (Small 33 / Medium 38 / Large 42 px face). Medium is the default. */
+    /** Glasses value font size (Small 31 / Medium 33 / Large 42 px face). Medium is the default. */
     val hudFontSize: HudFontSize,
     /**
      * Manual battery-saver ("ECO") toggle. When on, the bridge dims the display, slows the BLE poll
