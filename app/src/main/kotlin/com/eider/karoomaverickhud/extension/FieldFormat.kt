@@ -183,7 +183,7 @@ data class FieldSpec(
 )
 
 /** Small glyph drawn beside a value when the rider enables HUD icons; mapped to an asset by the screen. */
-enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE }
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE }
 
 /**
  * The full field catalog — live metrics plus averages, max, NP/IF/VI, lap & last-lap variants,
@@ -243,9 +243,9 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.SEGMENT_DISTANCE_REMAINING, "SEG DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "seg left", valueField = DataType.Field.SEGMENT_DISTANCE_REMAINING),
     FieldSpec(DataType.Type.SEGMENT_ELEVATION_REMAINING, "SEG ELEV", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m seg", valueField = DataType.Field.SEGMENT_ELEVATION_REMAINING),
     // ---- climb (shown on the auto climb page while on a climb, when no segment is running) ----
-    FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.DISTANCE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
+    FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.GRADE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
     FieldSpec(DataType.Type.VERTICAL_SPEED, "VAM", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "VAM", valueField = DataType.Field.VERTICAL_SPEED),
-    FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
+    FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.TOP, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
     FieldSpec(DataType.Type.ELEVATION_TO_TOP, "ELEV TOP", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m top", valueField = DataType.Field.ELEVATION_TO_TOP),
     FieldSpec(DataType.Type.CLIMB_NUMBER, "CLIMB", FieldKind.CLIMB_STEPS, HudIcon.DISTANCE, unit = "climb"),
 )
@@ -368,6 +368,10 @@ object FieldFormat {
         DataType.Type.DISTANCE,
         DataType.Type.ELAPSED_TIME,
         DataType.Type.PEDAL_POWER_BALANCE,
+        // These two now have their own dedicated glyph (vertical "to top", and "%" for grade), so they
+        // show it alone — a "to top"/"%" tag beside it would just repeat what the icon already says.
+        DataType.Type.DISTANCE_TO_TOP,
+        DataType.Type.ELEVATION_GRADE,
     )
 
     /**
@@ -511,13 +515,14 @@ object FieldFormat {
      */
     fun radarOverlay(climb: NextClimb?, imperial: Boolean): RadarOverlay? {
         if (climb == null) return null
-        val unit = if (imperial) "mi" else "km"
+        val (distValue, distDim) = formatDistance(climb.distanceToStart, imperial)
+        val (lenValue, lenDim) = formatDistance(climb.length, imperial)
         return RadarOverlay(
-            distance = "${formatDistance(climb.distanceToStart, imperial)} $unit",
+            distance = "$distValue $distDim",
             // formatDuration expects milliseconds (see its note); ETA is seconds.
             eta = formatDuration(climb.etaSeconds * 1000.0),
             grade = "${"%.0f".format(climb.grade)}%",
-            length = "${formatDistance(climb.length, imperial)} $unit",
+            length = "$lenValue $lenDim",
             gradeColor = gradeColor(climb.grade),
         )
     }
@@ -592,7 +597,10 @@ object FieldFormat {
                 HudCell(value, unit, color, spec.icon)
             }
             FieldKind.SPEED -> HudCell(formatSpeed(v, imperial), unit, HudColor.WHITE, spec.icon)
-            FieldKind.DISTANCE -> HudCell(formatDistance(v, imperial), unit, HudColor.WHITE, spec.icon)
+            FieldKind.DISTANCE -> {
+                val (dv, dim) = formatDistance(v, imperial)
+                HudCell(dv, distanceUnit(spec, dim), HudColor.WHITE, spec.icon)
+            }
             FieldKind.TIME -> HudCell(formatDuration(v), unit, HudColor.WHITE, spec.icon) // v is ms
             // Interval countdown led by [INTERVAL_TIME_LEAD_MS] (clamped at 0 so the last second reads
             // 0:00 instead of going negative, which formatDuration would dash). v is ms.
@@ -716,12 +724,31 @@ object FieldFormat {
         return "%.1f".format(out)
     }
 
-    private fun formatDistance(meters: Double?, imperial: Boolean): String {
-        if (meters == null) return "--"
+    /**
+     * Distance as a value plus its dimension token. Short distances are shown at finer resolution:
+     * under 1 km drops to whole metres (980m, 100m, 35m), and the imperial analog drops to whole
+     * feet under 0.1 mi. Above the threshold it reverts to km/mi — one decimal under 100, none above.
+     * The token ("m"/"km"/"ft"/"mi") is returned separately so callers fold it into their unit label.
+     */
+    private fun formatDistance(meters: Double?, imperial: Boolean): Pair<String, String> {
+        if (meters == null) return "--" to if (imperial) "mi" else "km"
+        if (imperial) {
+            val miles = meters / 1609.344
+            if (miles < 0.1) return (meters * 3.28084).roundToInt().toString() to "ft"
+            return (if (miles >= 100) "%.0f".format(miles) else "%.1f".format(miles)) to "mi"
+        }
+        if (meters < 1000.0) return meters.roundToInt().toString() to "m"
         val km = meters / 1000.0
-        val out = if (imperial) km * 0.621371 else km
-        return if (out >= 100) "%.0f".format(out) else "%.1f".format(out)
+        return (if (km >= 100) "%.0f".format(km) else "%.1f".format(km)) to "km"
     }
+
+    /**
+     * Unit label for a distance cell: a descriptive override (e.g. "to top", "seg left") stands on
+     * its own with the dimension implied by magnitude; otherwise the live dimension token plus any
+     * suffix (e.g. "m lap", "km LL").
+     */
+    private fun distanceUnit(spec: FieldSpec, dim: String): String =
+        spec.unit ?: if (spec.suffix.isEmpty()) dim else "$dim ${spec.suffix}"
 
     /**
      * The Karoo SDK emits time fields ([Field.ELAPSED_TIME] et al.) as **milliseconds** —

@@ -99,7 +99,8 @@ class RouteRadarTest {
     fun overlayRendersDistanceEtaGradeLength() {
         val nc = NextClimb(distanceToStart = 500.0, etaSeconds = 50.0, grade = 8.0, length = 1_200.0, totalElevation = 96.0)
         val o = FieldFormat.radarOverlay(nc, imperial = false)!!
-        assertEquals("0.5 km", o.distance)
+        // Sub-kilometre distance-to-climb renders in whole metres, not fractional km.
+        assertEquals("500 m", o.distance)
         assertEquals("0:50", o.eta)
         assertEquals("8%", o.grade)
         assertEquals("1.2 km", o.length)
