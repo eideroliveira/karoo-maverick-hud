@@ -132,7 +132,7 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                         cfg.hudFontSize,
                     ) { scope.launch { HudPreferences.setHudFontSize(ctx, it) } }
                     KText(
-                        "How big the data values read on the glasses. Medium sits between the old 4- and 6-field sizes.",
+                        "How big the data values read on the glasses, independent of how many fields are on the page.",
                         color = K.text3, size = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 11.dp),
                     )
                 }
