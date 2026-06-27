@@ -173,7 +173,7 @@ class HudScreen : Screen(420f, 150f) {
     private val ctrlBox = Rect()
     private val sigBars = Array(3) { Rect() }
     private val brightText = Text() // focused control item, e.g. "BRIGHTNESS  60%" / "RADAR  ON"
-    private val ctrlHint = Text() // "hold: next  ·  swipe/tap: change" — how to drive the control window
+    private val ctrlHint = Text() // "fwd: next  ·  tap: toggle  ·  back: close" — how to drive the control window
 
     // Trajectory map (a centre overlay shown on descents): the heading-up route polyline, a small
     // "you" marker at the bottom, and a centred footer with the current grade + zoom.
@@ -658,7 +658,7 @@ class HudScreen : Screen(420f, 150f) {
         val bars = ctrlSignal.coerceIn(0, 3)
         for (i in sigBars.indices) sigBars[i].setVisibility(i < bars)
 
-        // The focused control item and its value; temple-pad long-tap cycles which item this is.
+        // The focused control item and its value; a temple-pad forward swipe cycles which item this is.
         val (line, color) = when (ctrlFocus) {
             1 -> "AUTO BRIGHT  ${onOff(ctrlAuto)}" to (if (ctrlAuto) EvsColor.Yellow.rgba else EvsColor.White.rgba)
             2 -> "RADAR  ${onOff(ctrlRadar)}" to EvsColor.White.rgba
@@ -671,7 +671,7 @@ class HudScreen : Screen(420f, 150f) {
             }
         }
         brightText.setText(line).setForegroundColor(color)
-        ctrlHint.setText("hold: next  ·  swipe/tap: change")
+        ctrlHint.setText("fwd: next  ·  tap: toggle  ·  back: close")
     }
 
     private fun onOff(on: Boolean): String = if (on) "ON" else "OFF"
