@@ -183,7 +183,7 @@ data class FieldSpec(
 )
 
 /** Small glyph drawn beside a value when the rider enables HUD icons; mapped to an asset by the screen. */
-enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE }
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE }
 
 /**
  * The full field catalog — live metrics plus averages, max, NP/IF/VI, lap & last-lap variants,
@@ -243,9 +243,9 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.SEGMENT_DISTANCE_REMAINING, "SEG DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "seg left", valueField = DataType.Field.SEGMENT_DISTANCE_REMAINING),
     FieldSpec(DataType.Type.SEGMENT_ELEVATION_REMAINING, "SEG ELEV", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m seg", valueField = DataType.Field.SEGMENT_ELEVATION_REMAINING),
     // ---- climb (shown on the auto climb page while on a climb, when no segment is running) ----
-    FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.DISTANCE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
+    FieldSpec(DataType.Type.ELEVATION_GRADE, "GRADE", FieldKind.GRADE, HudIcon.GRADE, unit = "%", valueField = DataType.Field.ELEVATION_GRADE),
     FieldSpec(DataType.Type.VERTICAL_SPEED, "VAM", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "VAM", valueField = DataType.Field.VERTICAL_SPEED),
-    FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.DISTANCE, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
+    FieldSpec(DataType.Type.DISTANCE_TO_TOP, "TO TOP", FieldKind.DISTANCE, HudIcon.TOP, unit = "to top", valueField = DataType.Field.DISTANCE_TO_TOP),
     FieldSpec(DataType.Type.ELEVATION_TO_TOP, "ELEV TOP", FieldKind.NUMBER, HudIcon.DISTANCE, unit = "m top", valueField = DataType.Field.ELEVATION_TO_TOP),
     FieldSpec(DataType.Type.CLIMB_NUMBER, "CLIMB", FieldKind.CLIMB_STEPS, HudIcon.DISTANCE, unit = "climb"),
 )
@@ -355,6 +355,10 @@ object FieldFormat {
         DataType.Type.DISTANCE,
         DataType.Type.ELAPSED_TIME,
         DataType.Type.PEDAL_POWER_BALANCE,
+        // These two now have their own dedicated glyph (vertical "to top", and "%" for grade), so they
+        // show it alone — a "to top"/"%" tag beside it would just repeat what the icon already says.
+        DataType.Type.DISTANCE_TO_TOP,
+        DataType.Type.ELEVATION_GRADE,
     )
 
     /**

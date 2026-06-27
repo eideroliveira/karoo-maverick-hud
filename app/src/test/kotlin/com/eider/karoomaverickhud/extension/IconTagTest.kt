@@ -22,6 +22,9 @@ class IconTagTest {
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.PEDAL_POWER_BALANCE))
         // Ride time is the original time field.
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.ELAPSED_TIME))
+        // These two own a dedicated glyph (vertical "to top", "%" for grade) → icon-only, no tag.
+        assertEquals("", FieldFormat.iconTagFor(DataType.Type.DISTANCE_TO_TOP))
+        assertEquals("", FieldFormat.iconTagFor(DataType.Type.ELEVATION_GRADE))
     }
 
     @Test
@@ -34,8 +37,8 @@ class IconTagTest {
         // The other time fields are told apart by what they time.
         assertEquals("lap", FieldFormat.iconTagFor(DataType.Type.ELAPSED_TIME_LAP))
         assertEquals("last lap", FieldFormat.iconTagFor(DataType.Type.ELAPSED_TIME_LAST_LAP))
-        // The climb's two distances share the distance icon (the user's "to top" example).
-        assertEquals("to top", FieldFormat.iconTagFor(DataType.Type.DISTANCE_TO_TOP))
+        // Elevation-to-top still reuses the distance icon, so it keeps a tag to tell it apart.
+        assertEquals("m top", FieldFormat.iconTagFor(DataType.Type.ELEVATION_TO_TOP))
     }
 
     @Test

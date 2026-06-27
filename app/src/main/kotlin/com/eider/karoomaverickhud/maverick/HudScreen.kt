@@ -47,10 +47,11 @@ class HudScreen : Screen(420f, 150f) {
     private val screenW = 420f
     private val leftX = 8f
     private val rightX = screenW - 8f
-    // Reduced icon footprint (was 26, matching the source PNGs): a smaller glyph leaves room for a
-    // differentiator tag beside it and reads as secondary to the value. [iconTextGap] is the space
-    // between the icon and that tag. Icons are scaled to [iconW] at render via Image.setWidthHeight.
-    private val iconW = 18f
+    // Icon footprint sized to match the unit/label font (was 26, then 18) so the glyph reads as a
+    // peer of the label rather than dominating it; it stays secondary to the zone-coloured value.
+    // [iconTextGap] is the space between the icon and any differentiator tag. Icons are scaled to
+    // [iconW] at render via Image.setWidthHeight.
+    private val iconW = 14f
     private val iconTextGap = 3f
 
     // Side-by-side (5–6 field) tuning, in screen px. [sideGap] is the space between the value and
@@ -159,6 +160,8 @@ class HudScreen : Screen(420f, 150f) {
     private val imgTime = ImgSrc("ic_time.png", ImgSrc.Slot.s5)
     private val imgDistance = ImgSrc("ic_distance.png", ImgSrc.Slot.s6)
     private val imgBalance = ImgSrc("ic_balance.png", ImgSrc.Slot.s7)
+    private val imgTop = ImgSrc("ic_top.png", ImgSrc.Slot.s8)       // distance-to-top: vertical arrow to a top line
+    private val imgGrade = ImgSrc("ic_grade.png", ImgSrc.Slot.s9)   // grade: a percent sign
     private val currentIcon = arrayOfNulls<HudIcon>(cellCount) // avoid redundant setResource
 
     // Centre control-window widgets.
@@ -578,7 +581,10 @@ class HudScreen : Screen(420f, 150f) {
                 icons[i].setResource(imgSrcFor(icon))
                 currentIcon[i] = icon
             }
-            icons[i].setWidthHeight(iconW, iconW).setForegroundColor(LABEL_RGBA)
+            // The glyph's light-grey colour is baked into the PNG asset: setForegroundColor doesn't
+            // tint a full-colour image (it would otherwise leave the icon white), so we pass white
+            // here as a no-op and let the asset carry the colour.
+            icons[i].setWidthHeight(iconW, iconW).setForegroundColor(WHITE_RGBA)
                 .setXY(iconX, slot.iconY).setVisibility(true)
         }
     }
@@ -591,6 +597,8 @@ class HudScreen : Screen(420f, 150f) {
         HudIcon.TIME -> imgTime
         HudIcon.DISTANCE -> imgDistance
         HudIcon.BALANCE -> imgBalance
+        HudIcon.TOP -> imgTop
+        HudIcon.GRADE -> imgGrade
     }
 
     /** Draw or hide the centre control window from the latest [setControl] state + snapshot. */

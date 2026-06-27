@@ -45,6 +45,15 @@ private fun iconName(kind: FieldKind): String = when (kind) {
     FieldKind.RATIO, FieldKind.NUMBER -> "bolt"
 }
 
+/**
+ * Per-field icon overrides — most fields take their glyph from [iconName] by kind, but a few own a
+ * dedicated glyph that the kind alone can't express (the climb's distance-to-top, and grade as "%").
+ */
+private val ICON_OVERRIDES: Map<String, String> = mapOf(
+    DataType.Type.DISTANCE_TO_TOP to "totop",
+    DataType.Type.ELEVATION_GRADE to "percent",
+)
+
 private fun zoneKind(kind: FieldKind): ZoneKind? = when (kind) {
     FieldKind.POWER -> ZoneKind.POWER
     FieldKind.HR -> ZoneKind.HR
@@ -68,7 +77,8 @@ private fun uiUnit(spec: FieldSpec): String {
  * synthetic block·rep field (computed in the pipeline, not a Karoo stream, so it isn't in FIELD_SPECS).
  */
 val UI_FIELDS: Map<String, UiField> = FIELD_SPECS.associate { spec ->
-    spec.id to UiField(spec.id, spec.label, uiUnit(spec), iconName(spec.kind), zoneKind(spec.kind))
+    val icon = ICON_OVERRIDES[spec.id] ?: iconName(spec.kind)
+    spec.id to UiField(spec.id, spec.label, uiUnit(spec), icon, zoneKind(spec.kind))
 } + (WorkoutBlocks.FIELD_REP to UiField(WorkoutBlocks.FIELD_REP, WorkoutBlocks.LABEL, WorkoutBlocks.UNIT, "time", null))
 
 /**

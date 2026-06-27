@@ -78,7 +78,8 @@ object K {
  * keep using the bright [K] zone palette.
  */
 object Lens {
-    val label = Color(0xFF99A1AC)          // dim grey field labels / icons on the lens
+    val label = Color(0xFF99A1AC)          // dim grey field labels on the lens
+    val icon = Color(0xFFC8CED6)           // light grey field icons — matches the baked glasses asset
     val faint = Color(0xFF646B76)          // fainter still (empty-slot placeholder)
     val accent = Color(0xFF1FE3C8)         // bright teal — page dots, selected slot
     val accentDim = Color(0x241FE3C8)      // ~0.14 alpha selected-slot fill
@@ -117,6 +118,10 @@ val ICON_PATHS: Map<String, String> = mapOf(
     "balance" to "M3 5L12 19L3 19Z M21 5L12 19L21 19Z",
     "gear" to "M12 12 m-3.2 0 a3.2 3.2 0 1 0 6.4 0 a3.2 3.2 0 1 0 -6.4 0 M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1",
     "grade" to "M3 19 21 5 M3 19h18",
+    // percent sign — the GRADE field's glyph (two rings + a slash)
+    "percent" to "M6 18 18 6 M7.5 7.5 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0 M16.5 16.5 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0",
+    // distance-to-top — an up-arrow striking a top line ("to the top")
+    "totop" to "M4 4h16 M12 20V7 M7 12 12 7 17 12",
     "ascent" to "m3 18 5-8 4 5 3-4 6 7Z",
     "temp" to "M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z",
     "np" to "M4 18V6l8 8 8-8v12",
