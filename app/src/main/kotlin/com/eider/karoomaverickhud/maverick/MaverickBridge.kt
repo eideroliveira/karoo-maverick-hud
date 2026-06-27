@@ -196,9 +196,6 @@ class MaverickBridge(
     }
 
     fun update(snapshot: HudSnapshot) {
-        // While the settings app is pushing a live preview, it owns the glasses — ignore the
-        // ride pipeline so the two don't fight over the screen.
-        if (HudState.previewSnapshot.value != null) return
         // A live segment/climb page takes over: snap to it on the rising edge (and when the pinned
         // page changes, e.g. segment→climb), then leave the rider free to flip while it stays
         // pinned. Cleared pins resume normal cycling without a snap.
@@ -211,7 +208,15 @@ class MaverickBridge(
         // otherwise an unstamped frame would never equal the eco-stamped lastSnapshot while saver is
         // active, defeating the dedup and pushing *more* frames (the opposite of saver's intent).
         val stamped = snapshot.copy(pageIndex = pageIndex, battery = _glassesBattery.value, eco = Eco.active.value)
+        // Record the latest ride frame even while a preview owns the screen, so the restore when the
+        // preview clears reflects the *current* layout. Otherwise a config edit made in settings
+        // (e.g. turning race mode off, which widens the page set) would be dropped here and the
+        // glasses would snap back to the stale pre-edit frame — never rendering the restored pages.
         lastRideSnapshot = stamped
+        // While the settings app is pushing a live preview, it owns the glasses — don't push ride
+        // frames so the two don't fight over the screen. (lastRideSnapshot above stays current so
+        // the preview-clear restore picks up any edits made while settings was open.)
+        if (HudState.previewSnapshot.value != null) return
         // Skip redundant pushes: when idle/paused or the sensors are steady, the pipeline keeps
         // ticking out identical frames that would otherwise re-flush the glasses every interval.
         // Equality is structural (HudSnapshot/HudCell are data classes).
