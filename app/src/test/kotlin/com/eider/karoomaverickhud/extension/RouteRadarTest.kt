@@ -110,8 +110,9 @@ class RouteRadarTest {
     fun rendersDistanceEtaGradeLength() {
         val nc = NextClimb(distanceToStart = 500.0, etaSeconds = 50.0, grade = 8.0, length = 1_200.0, totalElevation = 96.0)
         val cells = FieldFormat.radarCells(nc, imperial = false)
-        assertEquals("0.5", cells[RouteRadar.FIELD_DISTANCE]!!.value)
-        assertEquals("km", cells[RouteRadar.FIELD_DISTANCE]!!.units)
+        // Sub-kilometre distance-to-climb renders in whole metres, not fractional km.
+        assertEquals("500", cells[RouteRadar.FIELD_DISTANCE]!!.value)
+        assertEquals("m", cells[RouteRadar.FIELD_DISTANCE]!!.units)
         assertEquals(HudColor.CYAN, cells[RouteRadar.FIELD_DISTANCE]!!.color)
         assertEquals("0:50", cells[RouteRadar.FIELD_ETA]!!.value)
         assertEquals("8", cells[RouteRadar.FIELD_GRADE]!!.value)
