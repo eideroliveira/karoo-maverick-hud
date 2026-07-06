@@ -332,6 +332,19 @@ data class HudSnapshot(
      * [trajectory] in render precedence.
      */
     val climb: ClimbOverlay? = null,
+    /**
+     * Mid-workout readout (interval countdown + avg/NP power) drawn in the centre of every page
+     * *except* the workout page (see [workoutPageIndex]) — the workout page already carries the
+     * detail, so the overlay brings the essentials to whatever other page the rider is on. Null
+     * outside a structured workout. Lowest overlay precedence after the descent [trajectory]
+     * (the interval matters, but not more than reading a descent's curves).
+     */
+    val workout: WorkoutOverlay? = null,
+    /**
+     * Index of the configured workout page within [pages] while a workout is live, so the renderer
+     * can suppress the [workout] overlay there; null when no workout page is present.
+     */
+    val workoutPageIndex: Int? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
@@ -383,6 +396,22 @@ data class ClimbOverlay(
     val avgGradeColor: HudColor,
     val climbLabel: String,
     val profile: ClimbProfileData?,
+)
+
+/**
+ * Mid-workout centre overlay: the interval countdown plus ride avg and NP power, so the rider keeps
+ * the workout essentials while flipping through non-workout pages. [remaining] carries the same 1 s
+ * lead as the INTERVAL field ([FieldFormat] INTERVAL_TIME_LEAD_MS) so the two never disagree.
+ * [blink] is true for the interval's last five displayed seconds — the renderer flashes the
+ * countdown so an imminent step change registers in peripheral vision. [avg]/[np] are full
+ * [HudCell]s (zone-coloured) built by the real formatter. Built by [FieldFormat.workoutOverlay];
+ * null (pipeline-gated) outside a structured workout.
+ */
+data class WorkoutOverlay(
+    val remaining: String,
+    val blink: Boolean,
+    val avg: HudCell,
+    val np: HudCell,
 )
 
 object FieldFormat {
@@ -629,6 +658,36 @@ object FieldFormat {
             profile = profile,
         )
     }
+
+    /**
+     * Mid-workout overlay from the interval-countdown stream plus the ride's average and normalized
+     * power. The countdown mirrors the INTERVAL field exactly: same [DataType.Field.WORKOUT_TIME_TO_STEP_FINISH]
+     * milliseconds, same [INTERVAL_TIME_LEAD_MS] lead, clamped at 0. [WorkoutOverlay.blink] arms for
+     * the last [WORKOUT_BLINK_WINDOW_MS] of *displayed* countdown (5 s per the design), and only while
+     * the stream is actually carrying a time — a workout without a timed step doesn't flash. The
+     * power cells run through the real [format] so zone colours match the data fields. The caller
+     * gates on workout-active; this never returns null so a rest/untimed step still shows "--:--".
+     */
+    fun workoutOverlay(
+        remainState: StreamState,
+        avgPowerState: StreamState,
+        npState: StreamState,
+        zones: ZoneConfig,
+    ): WorkoutOverlay {
+        val rawMs = (remainState as? StreamState.Streaming)
+            ?.dataPoint?.values?.get(DataType.Field.WORKOUT_TIME_TO_STEP_FINISH)
+        val shownMs = rawMs?.let { (it - INTERVAL_TIME_LEAD_MS).coerceAtLeast(0.0) }
+        return WorkoutOverlay(
+            remaining = formatDuration(shownMs),
+            blink = shownMs != null && shownMs <= WORKOUT_BLINK_WINDOW_MS,
+            // Watts either way, so the imperial flag is moot for these two cells.
+            avg = format(DataType.Type.AVERAGE_POWER, avgPowerState, imperial = false, zones = zones),
+            np = format(DataType.Type.NORMALIZED_POWER, npState, imperial = false, zones = zones),
+        )
+    }
+
+    /** Displayed countdown at or below which the workout overlay's interval time blinks. */
+    private const val WORKOUT_BLINK_WINDOW_MS = 5_000.0
 
     /**
      * Fallback for fields the HUD has no [FieldSpec] for — chiefly extension-provided fields the

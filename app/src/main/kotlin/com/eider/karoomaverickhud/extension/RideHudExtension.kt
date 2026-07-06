@@ -306,6 +306,31 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+        // Mid-workout centre overlay: the interval countdown plus avg/NP power, drawn on every page
+        // except the workout page itself (the renderer suppresses it there via
+        // [HudSnapshot.workoutPageIndex]). Gated on workout-active so its streams cost nothing
+        // otherwise, and dropped in critical battery mode — its per-second countdown would defeat
+        // the frame dedup that mode leans on.
+        val workoutOverlayFlow = combine(workoutActiveFlow, Eco.critical) { active, critical -> active && !critical }
+            .distinctUntilChanged()
+            .flatMapLatest { enabled ->
+                if (!enabled) {
+                    flowOf(null)
+                } else {
+                    combine(
+                        karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
+                        karoo.streamDataFlow(DataType.Type.AVERAGE_POWER),
+                        karoo.streamDataFlow(DataType.Type.NORMALIZED_POWER),
+                    ) { remain, avg, np ->
+                        val cfg = configFlow.value
+                        val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
+                        FieldFormat.workoutOverlay(remain, avg, np, zones)
+                    }
+                }
+            }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         // The only auto-page gate that still creates a pinned page is a live Strava segment. The
         // next-climb radar, the on-climb summary/profile and the descent trajectory all now draw as
         // centre overlays on whatever page is shown (see the snapshot builder), so they no longer add
@@ -336,12 +361,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             }
             val priority = mutableListOf<List<String>>()
             var pinned: Int? = null
-            if (workoutActive && cfg.workoutPage.isNotEmpty()) priority.add(cfg.workoutPage.take(cap))
+            var workoutPage: Int? = null
+            if (workoutActive && cfg.workoutPage.isNotEmpty()) {
+                workoutPage = priority.size
+                priority.add(cfg.workoutPage.take(cap))
+            }
             if (auto.segment && cfg.segmentPage.isNotEmpty()) {
                 pinned = priority.size
                 priority.add(cfg.segmentPage.take(cap))
             }
-            Layout(priority + base, pinned)
+            Layout(priority + base, pinned, workoutPage)
         }.combine(Eco.critical) { layout, critical ->
             // Critical battery: collapse to one minimal page (speed + time) to squeeze out the final
             // minutes. Overrides every priority/pinned page; the streams it needs are subscribed
@@ -415,8 +444,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     }
             }
             // Fold the block·rep field (synthetic) into the cells, then bundle the centre-overlay data
-            // — the descent trajectory, the next-climb radar and the on-climb summary/profile — into
-            // one frame so all of it rides the same sample() throttle as the stream cells.
+            // — the descent trajectory, the next-climb radar, the on-climb summary/profile and the
+            // mid-workout readout — into one frame so all of it rides the same sample() throttle as
+            // the stream cells. (The workout overlay joins via a chained combine only because the
+            // typed combine overloads stop at five flows.)
             combine(cellsFlow, blockRepFlow, trajectoryFlow, nextClimbFlow, onClimbFlow) { cells, rep, traj, nextClimb, onClimb ->
                 val withRep = if (rep != null) cells + (WorkoutBlocks.FIELD_REP to WorkoutBlocks.cell(rep)) else cells
                 Frame(
@@ -426,7 +457,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     radar = FieldFormat.radarOverlay(nextClimb, configFlow.value.imperial),
                     climb = onClimb,
                 )
-            }
+            }.combine(workoutOverlayFlow) { frame, workout -> frame.copy(workout = workout) }
         }
 
         // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
@@ -463,22 +494,29 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     trajectory = frame.trajectory,
                     radar = frame.radar,
                     climb = frame.climb,
+                    workout = frame.workout,
+                    workoutPageIndex = frame.layout.workoutPageIndex,
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
             .launchIn(scope)
     }
 
-    /** A computed page layout: the pages to show and an optional page to pin (segment/climb). */
+    /**
+     * A computed page layout: the pages to show, an optional page to pin (segment/climb), and the
+     * index of the live workout page ([workoutPageIndex], null when none) so the workout overlay
+     * can be suppressed on it.
+     */
     private data class Layout(
         val pages: List<List<String>>,
         val pinnedPage: Int?,
+        val workoutPageIndex: Int? = null,
     )
 
     /**
      * One throttled frame handed to the snapshot builder: the page [layout] + resolved [cells], plus
-     * the three centre overlays — the descent [trajectory], the next-climb [radar] and the on-[climb]
-     * summary/profile — each null when not active.
+     * the centre overlays — the descent [trajectory], the next-climb [radar], the on-[climb]
+     * summary/profile and the mid-[workout] readout — each null when not active.
      */
     private data class Frame(
         val layout: Layout,
@@ -486,6 +524,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val trajectory: Trajectory?,
         val radar: RadarOverlay?,
         val climb: ClimbOverlay?,
+        val workout: WorkoutOverlay? = null,
     )
 
     /**
