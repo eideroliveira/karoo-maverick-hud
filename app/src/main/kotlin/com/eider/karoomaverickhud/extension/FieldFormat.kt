@@ -83,8 +83,10 @@ val DEFAULT_HR_ZONES: List<ZoneBand> = listOf(
 val POWER_ZONE_COLORS = listOf(
     HudColor.CYAN, HudColor.WHITE, HudColor.GREEN, HudColor.YELLOW, HudColor.ORANGE, HudColor.RED, HudColor.PURPLE,
 )
+// HR reuses the power ramp for the equivalently named bands (Recovery→Max ≙ Z1→Z5), so both
+// fields end on bright red — purple/pink reads as an unreadable dark red for HR on the LCOS.
 val HR_ZONE_COLORS = listOf(
-    HudColor.WHITE, HudColor.GREEN, HudColor.ORANGE, HudColor.RED, HudColor.PURPLE,
+    HudColor.WHITE, HudColor.GREEN, HudColor.YELLOW, HudColor.ORANGE, HudColor.RED,
 )
 
 /** The band whose [ZoneBand.lo] the percentage clears, searched top-down (the design's rule). */
