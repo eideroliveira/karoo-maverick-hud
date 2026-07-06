@@ -103,7 +103,7 @@ fun HudColor.toComposeColor(): Color = when (this) {
  * zone palette instead.
  */
 val POWER_ZONE_UI_COLORS = listOf(K.zCyan, K.zNeutral, K.zGreen, K.zYellow, K.zOrange, K.zRed, K.zPurple)
-val HR_ZONE_UI_COLORS = listOf(K.zNeutral, K.zGreen, K.zOrange, K.zRed, K.zPurple)
+val HR_ZONE_UI_COLORS = listOf(K.zNeutral, K.zGreen, K.zYellow, K.zOrange, K.zRed)
 
 /* ---- Icon set: crisp line glyphs, viewBox 24, stroked with the given colour ---- */
 val ICON_PATHS: Map<String, String> = mapOf(
