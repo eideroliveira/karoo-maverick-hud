@@ -199,15 +199,8 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             KText(title, color = K.text, size = 20.sp, weight = FontWeight.Bold, family = CondFamily)
                             KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 14.sp)
                         }
-                        // The GRADE field reads "live/avg-remaining" on the glasses while on a climb
-                        // (see FieldFormat) — live grade over the whole-number average. Mirror that
-                        // composite in the climb editor's lens so the preview matches; the demo
-                        // average (12%) echoes the to-top demo values.
-                        val lensValues = if (isClimb) {
-                            values + (DataType.Type.ELEVATION_GRADE to DemoVal("7.2/12", 7.2))
-                        } else values
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            EditableHud(curPage, slotCount, cfg, lensValues,
+                            EditableHud(curPage, slotCount, cfg, values,
                                 selected = if (picker?.first == cur) picker!!.second else -1,
                                 onSlot = { picker = cur to it }, width = 408.dp)
                         }

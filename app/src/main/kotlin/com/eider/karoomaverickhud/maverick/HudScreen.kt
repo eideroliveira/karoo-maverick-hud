@@ -28,6 +28,7 @@ import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
 import com.eider.karoomaverickhud.extension.RadarOverlay
 import com.eider.karoomaverickhud.extension.Trajectory
+import com.eider.karoomaverickhud.extension.WorkoutOverlay
 
 /**
  * HUD on a 420×150 Maverick screen. Data lives in the two edge columns (the first and last of
@@ -202,6 +203,20 @@ class HudScreen : Screen(420f, 150f) {
     private val climbBars = Array(ClimbProfile.BUCKETS) { Rect() }
     private val climbMarker = Rect()
 
+    // Mid-workout overlay (a centre overlay on every page but the workout page): a cyan "INTERVAL"
+    // caption, the interval countdown in the medium value face (blinking over its final 5 s), and a
+    // zone-coloured avg/NP power pair astride the centre line.
+    private val workoutLabel = Text()
+    private val workoutTime = Text()
+    private val workoutAvg = Text()
+    private val workoutNp = Text()
+
+    // Whether the workout countdown is currently drawn in blink mode, plus the last blink phase
+    // applied — lets onUpdateUI flip just the countdown's visibility between full renders (the
+    // pushed snapshot only changes ~1/s; the blink runs at [WORKOUT_BLINK_HALF_MS]).
+    @Volatile private var workoutBlinking = false
+    private var lastBlinkVisible = true
+
     @Volatile private var snapshot: HudSnapshot = HudSnapshot.empty
 
     // Last frame actually rendered, so onUpdateUI can no-op when nothing changed. The bridge only
@@ -339,6 +354,45 @@ class HudScreen : Screen(420f, 150f) {
         setupTrajectory()
         setupRadar()
         setupClimb()
+        setupWorkout()
+    }
+
+    /** Create the mid-workout overlay's caption, countdown and avg/NP power pair (all hidden). */
+    private fun setupWorkout() {
+        workoutLabel
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, WORKOUT_LABEL_Y)
+            .setForegroundColor(CYAN_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+        // The countdown runs the medium (33px) value face — it's the overlay's headline and has to
+        // read at a glance mid-effort; the chrome around it stays on the stock Small font.
+        workoutTime
+            .setText("")
+            .setResource(valueFontMedium)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, WORKOUT_TIME_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        workoutAvg
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.right)
+            .setXY(screenW / 2f - WORKOUT_POWER_GAP, WORKOUT_POWER_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        workoutNp
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(screenW / 2f + WORKOUT_POWER_GAP, WORKOUT_POWER_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
     }
 
     /** Create the trajectory map's polyline, "you" marker and centred footer (all hidden). */
@@ -488,11 +542,21 @@ class HudScreen : Screen(420f, 150f) {
         val snap = snapshot
         // The glasses call this every frame. When neither the pushed snapshot nor the control
         // window changed since the last render, re-applying identical text/positions just re-dirties
-        // elements and re-flushes them over BLE — so bail out and let the prior frame stand.
+        // elements and re-flushes them over BLE — so bail out and let the prior frame stand. The one
+        // exception is the workout countdown's blink: it runs faster than the ~1/s snapshot cadence,
+        // so on an otherwise-unchanged frame we flip just that element's visibility and still bail.
+        val blinkVisible = (timestampMs / WORKOUT_BLINK_HALF_MS) % 2L == 0L
         val controlSig = controlSignature()
-        if (snap === lastRenderedSnapshot && controlSig == lastControlSignature) return
+        if (snap === lastRenderedSnapshot && controlSig == lastControlSignature) {
+            if (workoutBlinking && blinkVisible != lastBlinkVisible) {
+                lastBlinkVisible = blinkVisible
+                workoutTime.setVisibility(blinkVisible)
+            }
+            return
+        }
         lastRenderedSnapshot = snap
         lastControlSignature = controlSig
+        lastBlinkVisible = blinkVisible
 
         renderControlWindow(snap)
         renderBatteryWarning(snap)
@@ -504,6 +568,7 @@ class HudScreen : Screen(420f, 150f) {
             hideTrajectory()
             hideRadar()
             hideClimb()
+            hideWorkout()
             statusText.setText("")
             pauseDot.setText("")
             ecoText.setVisibility(false)
@@ -520,6 +585,7 @@ class HudScreen : Screen(420f, 150f) {
             hideTrajectory()
             hideRadar()
             hideClimb()
+            hideWorkout()
             statusText.setText("WAITING FOR RIDE")
             pauseDot.setText("KAROO CONNECTED")
             return
@@ -536,13 +602,17 @@ class HudScreen : Screen(420f, 150f) {
         }
 
         // Centre overlays, drawn over the clear centre of whatever page is shown. Precedence: the
-        // descent trajectory first, then the on-climb summary/profile, then the next-climb radar
-        // preview (you're either approaching a climb or on it, so the latter two rarely coincide).
+        // descent trajectory first (reading a curve beats everything), then the mid-workout readout,
+        // then the on-climb summary/profile, then the next-climb radar preview (you're either
+        // approaching a climb or on it, so the latter two rarely coincide). The workout readout is
+        // suppressed on the workout page itself — that page already carries the detail.
+        val workout = snap.workout?.takeIf { snap.workoutPageIndex == null || snap.pageIndex != snap.workoutPageIndex }
         when {
-            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar(); hideClimb() }
-            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideRadar() }
-            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideClimb() }
-            else -> { hideTrajectory(); hideRadar(); hideClimb() }
+            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar(); hideClimb(); hideWorkout() }
+            workout != null -> { renderWorkout(workout, blinkVisible); hideTrajectory(); hideRadar(); hideClimb() }
+            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideRadar(); hideWorkout() }
+            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideClimb(); hideWorkout() }
+            else -> { hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
         }
 
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
@@ -660,6 +730,33 @@ class HudScreen : Screen(420f, 150f) {
             .setXY(mx - 1f, CLIMB_PROF_TOP_Y)
             .setWidthHeight(2f, h)
             .setVisibility(true)
+    }
+
+    /**
+     * Draw the mid-workout readout centred over the current page: the "INTERVAL" caption, the
+     * countdown (hidden on the blink's off phase during the interval's last seconds), and the
+     * zone-coloured "AVG n" / "NP n" pair astride the centre line.
+     */
+    private fun renderWorkout(workout: WorkoutOverlay, blinkVisible: Boolean) {
+        workoutBlinking = workout.blink
+        workoutLabel.setText("INTERVAL").setVisibility(true)
+        workoutTime.setText(workout.remaining)
+            .setVisibility(!workout.blink || blinkVisible)
+        workoutAvg.setText("AVG ${workout.avg.value}")
+            .setForegroundColor(colorRgba(workout.avg.color))
+            .setVisibility(true)
+        workoutNp.setText("NP ${workout.np.value}")
+            .setForegroundColor(colorRgba(workout.np.color))
+            .setVisibility(true)
+    }
+
+    /** Hide every workout-overlay element (outside a workout, or on the workout page itself). */
+    private fun hideWorkout() {
+        workoutBlinking = false
+        workoutLabel.setVisibility(false)
+        workoutTime.setVisibility(false)
+        workoutAvg.setVisibility(false)
+        workoutNp.setVisibility(false)
     }
 
     /** Hide every on-climb-overlay element (when not on a climb). */
@@ -890,6 +987,15 @@ class HudScreen : Screen(420f, 150f) {
         private const val CLIMB_PROF_RIGHT = 310f
         private const val CLIMB_PROF_TOP_Y = 100f
         private const val CLIMB_PROF_BASE_Y = 146f
+
+        // Mid-workout overlay geometry: caption, then the 33px countdown face, then the avg/NP pair
+        // split [WORKOUT_POWER_GAP] either side of the centre line — all inside the clear centre band.
+        private const val WORKOUT_LABEL_Y = 8f
+        private const val WORKOUT_TIME_Y = 32f
+        private const val WORKOUT_POWER_Y = 92f
+        private const val WORKOUT_POWER_GAP = 14f
+        // Half-period of the countdown blink (its final 5 s): 500 ms off/on — urgent but readable.
+        private const val WORKOUT_BLINK_HALF_MS = 500L
     }
 
     override fun onTouch(touch: TouchDirection) {
