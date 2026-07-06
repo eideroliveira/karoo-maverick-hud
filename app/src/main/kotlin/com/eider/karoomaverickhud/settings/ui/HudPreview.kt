@@ -349,9 +349,9 @@ private fun BoxScope.RadarOverlayCells(cfg: HudConfig) {
     ) {
         KText("NEXT CLIMB", color = K.zCyan, size = 16.sp, weight = FontWeight.Bold,
             family = CondFamily, letterSpacing = 1.sp, maxLines = 1, softWrap = false)
-        KText("${radar.distance}   ${radar.eta}", color = K.zWhite, size = 20.sp,
+        KText("↔ ${radar.distance}   ${radar.eta}", color = K.zWhite, size = 20.sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
-        KText("${radar.grade}   ${radar.length}", color = radar.gradeColor.toComposeColor(),
+        KText("${radar.grade}   ↔ ${radar.length}", color = radar.gradeColor.toComposeColor(),
             size = 20.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
     }
 }
