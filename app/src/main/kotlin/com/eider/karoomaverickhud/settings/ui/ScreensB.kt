@@ -199,6 +199,9 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                             KText(title, color = K.text, size = 20.sp, weight = FontWeight.Bold, family = CondFamily)
                             KText("${curPage.size}/$slotCount fields · tap a slot", color = K.text3, size = 14.sp)
                         }
+                        // The climb readout is now a centre overlay, not an editable page (see the
+                        // "Route auto-pages" section), so only the numbered / workout / segment pages
+                        // are edited here and the lens uses the plain demo values.
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                             EditableHud(curPage, slotCount, cfg, values,
                                 selected = if (picker?.first == cur) picker!!.second else -1,

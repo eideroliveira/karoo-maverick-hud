@@ -588,8 +588,9 @@ class HudScreen : Screen(420f, 150f) {
     /** Draw the next-climb radar readout centred over the current page. */
     private fun renderRadar(radar: RadarOverlay) {
         radarTitle.setText("NEXT CLIMB").setVisibility(true)
-        radarLine1.setText("${radar.distance}   ${radar.eta}").setVisibility(true)
-        radarLine2.setText("${radar.grade}   ${radar.length}")
+        // Horizontal distance to the climb (↔) + ETA; then grade + the climb's horizontal length (↔).
+        radarLine1.setText("↔ ${radar.distance}   ${radar.eta}").setVisibility(true)
+        radarLine2.setText("${radar.grade}   ↔ ${radar.length}")
             .setForegroundColor(colorRgba(radar.gradeColor))
             .setVisibility(true)
     }
@@ -619,8 +620,8 @@ class HudScreen : Screen(420f, 150f) {
         climbGrade.setText("${climb.grade} / ${climb.avgGrade}%")
             .setForegroundColor(colorRgba(climb.gradeColor))
             .setVisibility(true)
-        // Vertical metres to the summit ("TOP") and horizontal distance to the end ("END").
-        climbDist.setText("TOP ${climb.toTop}   END ${climb.toEnd}").setVisibility(true)
+        // Vertical metres to the summit (↕) and horizontal distance to the end (↔).
+        climbDist.setText("↕ ${climb.toTop}   ↔ ${climb.toEnd}").setVisibility(true)
         if (climb.mpa != null) {
             climbMpa.setText("MPA ${climb.mpa}").setVisibility(true)
         } else {
