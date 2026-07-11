@@ -347,6 +347,13 @@ data class HudSnapshot(
      * can suppress the [workout] overlay there; null when no workout page is present.
      */
     val workoutPageIndex: Int? = null,
+    /**
+     * The new gear ratio to flash in the centre for ~3 s right after a shift, colour-coded by how
+     * the ratio moved (green ≈ same, yellow harder, cyan easier — see [GearShift]). Null except in
+     * the brief window after a shift. Drawn just below the descent [trajectory] in precedence (a
+     * curve still beats a shift flash) and above the other centre overlays while it's up.
+     */
+    val gearShift: GearShiftOverlay? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)
@@ -997,6 +1004,31 @@ object FieldFormat {
      */
     private fun formatGears(point: DataPoint?, gear: GearLayout): Pair<String, String> {
         if (point == null) return "--/--" to ""
+
+        val teeth = gearTeeth(point, gear)
+        if (teeth != null) {
+            val (frontTeeth, rearTeeth) = teeth
+            return when (gear.display) {
+                "ratio" -> "%.2f".format(frontTeeth.toDouble() / rearTeeth) to ""
+                // Gear inches ≈ ratio × wheel diameter (700c ≈ 27").
+                "inches" -> "${(frontTeeth.toDouble() / rearTeeth * 27.0).roundToInt()}" to "in"
+                else -> "$frontTeeth/$rearTeeth" to "T"
+            }
+        }
+        // Fallback: the gear position number, as before.
+        val frontPos = point.values[DataType.Field.SHIFTING_FRONT_GEAR]?.roundToInt()
+        val rearPos = point.values[DataType.Field.SHIFTING_REAR_GEAR]?.roundToInt()
+        return if (frontPos != null && rearPos != null) "$frontPos/$rearPos" to "" else "--/--" to ""
+    }
+
+    /**
+     * Resolve (frontTeeth, rearTeeth) for a shifting [point], or null when teeth can't be formed.
+     * Teeth come from the sensor ([Field.SHIFTING_FRONT_GEAR_TEETH]/`..._REAR_...`) when present,
+     * else are mapped from the reported gear *position* via the rider's configured drivetrain
+     * ([gear]) — see [teethFromPosition]. Shared by the GEAR field ([formatGears]) and the
+     * gear-change overlay ([GearShift]) so both read the drivetrain identically.
+     */
+    fun gearTeeth(point: DataPoint, gear: GearLayout): Pair<Int, Int>? {
         val frontPos = point.values[DataType.Field.SHIFTING_FRONT_GEAR]?.roundToInt()
         val rearPos = point.values[DataType.Field.SHIFTING_REAR_GEAR]?.roundToInt()
         val frontMax = point.values[DataType.Field.SHIFTING_FRONT_GEAR_MAX]?.roundToInt()
@@ -1008,16 +1040,7 @@ object FieldFormat {
         val rearTeeth = point.values[DataType.Field.SHIFTING_REAR_GEAR_TEETH]?.roundToInt()
             ?: teethFromPosition(gear.rear, rearPos, rearMax, largestFirst = true)
 
-        if (frontTeeth != null && rearTeeth != null && rearTeeth > 0) {
-            return when (gear.display) {
-                "ratio" -> "%.2f".format(frontTeeth.toDouble() / rearTeeth) to ""
-                // Gear inches ≈ ratio × wheel diameter (700c ≈ 27").
-                "inches" -> "${(frontTeeth.toDouble() / rearTeeth * 27.0).roundToInt()}" to "in"
-                else -> "$frontTeeth/$rearTeeth" to "T"
-            }
-        }
-        // Fallback: the gear position number, as before.
-        return if (frontPos != null && rearPos != null) "$frontPos/$rearPos" to "" else "--/--" to ""
+        return if (frontTeeth != null && rearTeeth != null && rearTeeth > 0) frontTeeth to rearTeeth else null
     }
 
     /**

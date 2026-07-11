@@ -29,14 +29,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.sample
@@ -331,6 +335,43 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+        // Gear-change flash: whenever the resolved gear changes, show the new chainring/cassette
+        // ratio in the centre for [GearShift.VISIBLE_MS], colour-coded by how the ratio moved (see
+        // [GearShift]). The SHIFTING_GEARS stream is Idle without a shifting sensor, so this costs
+        // nothing then; dropped in critical battery mode alongside the other centre overlays. Re-
+        // subscribed when the gear config changes so teeth resolution uses the fresh drivetrain.
+        val gearShiftFlow = combine(
+            configFlow.map { it.gear }.distinctUntilChanged(), Eco.critical,
+        ) { gear, critical -> gear to critical }
+            .flatMapLatest { (gearCfg, critical) ->
+                if (critical) {
+                    flowOf(null)
+                } else {
+                    val layout = GearLayout(gearCfg.front, gearCfg.rear, gearCfg.display)
+                    karoo.streamDataFlow(DataType.Type.SHIFTING_GEARS)
+                        .map { GearShift.teeth((it as? StreamState.Streaming)?.dataPoint, layout) }
+                        .filterNotNull()
+                        .distinctUntilChanged()
+                        // Carry the previous gear so each change can be compared; the initial fold
+                        // value and the first real reading both yield null (no flash at ride start).
+                        .scan<Pair<Int, Int>, Pair<Pair<Int, Int>?, GearShiftOverlay?>>(null to null) { (prev, _), next ->
+                            next to prev?.let { GearShift.overlay(it, next) }
+                        }
+                        .mapNotNull { it.second }
+                        // Show the flash, then clear it after the window. flatMapLatest restarts the
+                        // timer on a fresh shift, so rapid shifting keeps the latest ratio up.
+                        .flatMapLatest { overlay ->
+                            flow<GearShiftOverlay?> {
+                                emit(overlay)
+                                delay(GearShift.VISIBLE_MS)
+                                emit(null)
+                            }
+                        }
+                }
+            }
+            .distinctUntilChanged()
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         // The only auto-page gate that still creates a pinned page is a live Strava segment. The
         // next-climb radar, the on-climb summary/profile and the descent trajectory all now draw as
         // centre overlays on whatever page is shown (see the snapshot builder), so they no longer add
@@ -458,6 +499,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     climb = onClimb,
                 )
             }.combine(workoutOverlayFlow) { frame, workout -> frame.copy(workout = workout) }
+                .combine(gearShiftFlow) { frame, gearShift -> frame.copy(gearShift = gearShift) }
         }
 
         // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
@@ -496,6 +538,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     climb = frame.climb,
                     workout = frame.workout,
                     workoutPageIndex = frame.layout.workoutPageIndex,
+                    gearShift = frame.gearShift,
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
@@ -525,6 +568,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val radar: RadarOverlay?,
         val climb: ClimbOverlay?,
         val workout: WorkoutOverlay? = null,
+        val gearShift: GearShiftOverlay? = null,
     )
 
     /**

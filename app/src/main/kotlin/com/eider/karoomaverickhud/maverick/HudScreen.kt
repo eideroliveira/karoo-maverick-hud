@@ -24,6 +24,7 @@ import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.HudIcon
+import com.eider.karoomaverickhud.extension.GearShiftOverlay
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
 import com.eider.karoomaverickhud.extension.RadarOverlay
@@ -211,6 +212,12 @@ class HudScreen : Screen(420f, 150f) {
     private val workoutAvg = Text()
     private val workoutNp = Text()
 
+    // Gear-change flash (a centre overlay shown for ~3 s after a shift): a dim "GEAR" caption over
+    // the new chainring/cassette ratio in the large value face, tinted by how the ratio moved
+    // (green ≈ same, yellow harder, cyan easier — see [GearShift]).
+    private val gearShiftLabel = Text()
+    private val gearShiftRatio = Text()
+
     // Whether the workout countdown is currently drawn in blink mode, plus the last blink phase
     // applied — lets onUpdateUI flip just the countdown's visibility between full renders (the
     // pushed snapshot only changes ~1/s; the blink runs at [WORKOUT_BLINK_HALF_MS]).
@@ -355,6 +362,28 @@ class HudScreen : Screen(420f, 150f) {
         setupRadar()
         setupClimb()
         setupWorkout()
+        setupGearShift()
+    }
+
+    /** Create the gear-change flash's dim "GEAR" caption and the large ratio readout (both hidden). */
+    private fun setupGearShift() {
+        gearShiftLabel
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, GEAR_SHIFT_LABEL_Y)
+            .setForegroundColor(LABEL_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+        // The ratio is the sole focus of the 3 s flash, so it runs the large (42px) value face.
+        gearShiftRatio
+            .setText("")
+            .setResource(valueFontLarge)
+            .setTextAlign(Align.center)
+            .setXY(screenW / 2f, GEAR_SHIFT_RATIO_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
     }
 
     /** Create the mid-workout overlay's caption, countdown and avg/NP power pair (all hidden). */
@@ -602,17 +631,19 @@ class HudScreen : Screen(420f, 150f) {
         }
 
         // Centre overlays, drawn over the clear centre of whatever page is shown. Precedence: the
-        // descent trajectory first (reading a curve beats everything), then the mid-workout readout,
-        // then the on-climb summary/profile, then the next-climb radar preview (you're either
-        // approaching a climb or on it, so the latter two rarely coincide). The workout readout is
-        // suppressed on the workout page itself — that page already carries the detail.
+        // descent trajectory first (reading a curve beats everything), then the brief gear-change
+        // flash (a deliberate rider action that wants immediate confirmation), then the mid-workout
+        // readout, then the on-climb summary/profile, then the next-climb radar preview (you're
+        // either approaching a climb or on it, so the latter two rarely coincide). The workout
+        // readout is suppressed on the workout page itself — that page already carries the detail.
         val workout = snap.workout?.takeIf { snap.workoutPageIndex == null || snap.pageIndex != snap.workoutPageIndex }
         when {
-            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar(); hideClimb(); hideWorkout() }
-            workout != null -> { renderWorkout(workout, blinkVisible); hideTrajectory(); hideRadar(); hideClimb() }
-            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideRadar(); hideWorkout() }
-            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideClimb(); hideWorkout() }
-            else -> { hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
+            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideGearShift(); hideRadar(); hideClimb(); hideWorkout() }
+            snap.gearShift != null -> { renderGearShift(snap.gearShift!!); hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
+            workout != null -> { renderWorkout(workout, blinkVisible); hideTrajectory(); hideGearShift(); hideRadar(); hideClimb() }
+            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideGearShift(); hideRadar(); hideWorkout() }
+            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideGearShift(); hideClimb(); hideWorkout() }
+            else -> { hideTrajectory(); hideGearShift(); hideRadar(); hideClimb(); hideWorkout() }
         }
 
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
@@ -758,6 +789,20 @@ class HudScreen : Screen(420f, 150f) {
         workoutTime.setVisibility(false)
         workoutAvg.setVisibility(false)
         workoutNp.setVisibility(false)
+    }
+
+    /** Draw the gear-change flash centred over the current page: the "GEAR" caption + tinted ratio. */
+    private fun renderGearShift(gearShift: GearShiftOverlay) {
+        gearShiftLabel.setText("GEAR").setVisibility(true)
+        gearShiftRatio.setText(gearShift.ratio)
+            .setForegroundColor(colorRgba(gearShift.color))
+            .setVisibility(true)
+    }
+
+    /** Hide the gear-change flash (outside the brief post-shift window). */
+    private fun hideGearShift() {
+        gearShiftLabel.setVisibility(false)
+        gearShiftRatio.setVisibility(false)
     }
 
     /** Hide every on-climb-overlay element (when not on a climb). */
@@ -997,6 +1042,11 @@ class HudScreen : Screen(420f, 150f) {
         private const val WORKOUT_POWER_GAP = 14f
         // Half-period of the countdown blink (its final 5 s): 500 ms off/on — urgent but readable.
         private const val WORKOUT_BLINK_HALF_MS = 500L
+
+        // Gear-change flash geometry: a small caption over the 42px ratio, roughly centred in the
+        // clear centre band (below the caption baseline, the large face reads down to ~110px).
+        private const val GEAR_SHIFT_LABEL_Y = 40f
+        private const val GEAR_SHIFT_RATIO_Y = 64f
     }
 
     override fun onTouch(touch: TouchDirection) {
