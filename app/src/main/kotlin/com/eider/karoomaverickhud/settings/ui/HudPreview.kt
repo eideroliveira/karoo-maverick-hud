@@ -208,7 +208,7 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val tag = if (showIcon) FieldFormat.iconTagFor(fieldId) else ""
     val labelOrIcon: @Composable () -> Unit = {
         if (showIcon) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 KIcon(field?.icon ?: "bolt", 12.dp, Lens.icon, stroke = 2.4f)
                 if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 13.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
             }
@@ -542,7 +542,7 @@ private fun EditSlot(
             val tag = if (showIcon) fieldId?.let { FieldFormat.iconTagFor(it) }.orEmpty() else ""
             val labelOrIcon: @Composable () -> Unit = {
                 if (showIcon) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         KIcon(field.icon, 8.dp, Lens.icon, stroke = 2.4f)
                         if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 8.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
                     }

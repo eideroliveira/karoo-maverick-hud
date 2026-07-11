@@ -59,7 +59,7 @@ class HudScreen : Screen(420f, 150f) {
     // [iconTextGap] is the space between the icon and any differentiator tag. Icons are scaled to
     // [iconW] at render via Image.setWidthHeight.
     private val iconW = 14f
-    private val iconTextGap = 3f
+    private val iconTextGap = 6f
 
     // Side-by-side (5–6 field) tuning, in screen px. [sideGap] is the space between the value and
     // its inboard icon/label; [sideLabelDy] drops the smaller icon/label down to sit against the
