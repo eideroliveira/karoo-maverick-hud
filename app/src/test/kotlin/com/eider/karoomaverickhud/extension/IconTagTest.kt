@@ -22,9 +22,10 @@ class IconTagTest {
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.PEDAL_POWER_BALANCE))
         // Ride time is the original time field.
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.ELAPSED_TIME))
-        // These two own a dedicated glyph (vertical "to top", "%" for grade) → icon-only, no tag.
+        // These own a dedicated glyph (vertical "to top", "%" for grade, cog for gear) → icon-only, no tag.
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.DISTANCE_TO_TOP))
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.ELEVATION_GRADE))
+        assertEquals("", FieldFormat.iconTagFor(DataType.Type.SHIFTING_GEARS))
     }
 
     @Test
@@ -43,9 +44,8 @@ class IconTagTest {
 
     @Test
     fun fieldsWithoutAnIconHaveNoTag() {
-        // IF/VI/gear have no glasses icon, so no tag.
+        // IF/VI have no glasses icon, so no tag.
         assertEquals("", FieldFormat.iconTagFor(DataType.Type.INTENSITY_FACTOR))
-        assertEquals("", FieldFormat.iconTagFor(DataType.Type.SHIFTING_GEARS))
         // Unknown/extension fields fall through to empty.
         assertEquals("", FieldFormat.iconTagFor("TYPE_SOME_EXTENSION_FIELD_ID"))
     }

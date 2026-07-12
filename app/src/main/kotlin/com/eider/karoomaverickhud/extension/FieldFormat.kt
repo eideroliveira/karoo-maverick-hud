@@ -193,7 +193,7 @@ data class FieldSpec(
 )
 
 /** Small glyph drawn beside a value when the rider enables HUD icons; mapped to an asset by the screen. */
-enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE }
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE, GEAR }
 
 /**
  * The full field catalog — live metrics plus averages, max, NP/IF/VI, lap & last-lap variants,
@@ -208,7 +208,7 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.SPEED, "SPEED", FieldKind.SPEED, HudIcon.SPEED, valueField = DataType.Field.SPEED),
     FieldSpec(DataType.Type.DISTANCE, "DIST", FieldKind.DISTANCE, HudIcon.DISTANCE, valueField = DataType.Field.DISTANCE),
     FieldSpec(DataType.Type.PEDAL_POWER_BALANCE, "L/R %", FieldKind.BALANCE, HudIcon.BALANCE),
-    FieldSpec(DataType.Type.SHIFTING_GEARS, "GEAR", FieldKind.GEARS),
+    FieldSpec(DataType.Type.SHIFTING_GEARS, "GEAR", FieldKind.GEARS, HudIcon.GEAR),
     // ---- averages ----
     FieldSpec(DataType.Type.AVERAGE_POWER, "AVG POWER", FieldKind.POWER, HudIcon.POWER, zone = true, suffix = "avg"),
     FieldSpec(DataType.Type.AVERAGE_HR, "AVG HR", FieldKind.HR, HudIcon.HEART, zone = true, suffix = "avg"),
@@ -451,6 +451,8 @@ object FieldFormat {
         // show it alone — a "to top"/"%" tag beside it would just repeat what the icon already says.
         DataType.Type.DISTANCE_TO_TOP,
         DataType.Type.ELEVATION_GRADE,
+        // The only field on the cog icon, so it shows the glyph alone.
+        DataType.Type.SHIFTING_GEARS,
     )
 
     /**

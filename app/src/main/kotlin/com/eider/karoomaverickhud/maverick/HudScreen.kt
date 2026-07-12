@@ -172,6 +172,7 @@ class HudScreen : Screen(420f, 150f) {
     private val imgBalance = ImgSrc("ic_balance.png", ImgSrc.Slot.s7)
     private val imgTop = ImgSrc("ic_top.png", ImgSrc.Slot.s8)       // distance-to-top: vertical arrow to a top line
     private val imgGrade = ImgSrc("ic_grade.png", ImgSrc.Slot.s9)   // grade: a percent sign
+    private val imgGear = ImgSrc("ic_gear.png", ImgSrc.Slot.s10)    // gear: a cog
     private val currentIcon = arrayOfNulls<HudIcon>(cellCount) // avoid redundant setResource
 
     // Centre control-window widgets.
@@ -914,6 +915,7 @@ class HudScreen : Screen(420f, 150f) {
         HudIcon.BALANCE -> imgBalance
         HudIcon.TOP -> imgTop
         HudIcon.GRADE -> imgGrade
+        HudIcon.GEAR -> imgGear
     }
 
     /** Draw or hide the centre control window from the latest [setControl] state + snapshot. */
