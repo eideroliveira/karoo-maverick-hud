@@ -323,8 +323,10 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 } else {
                     combine(
                         karoo.streamDataFlow(DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION),
-                        karoo.streamDataFlow(DataType.Type.AVERAGE_POWER),
-                        karoo.streamDataFlow(DataType.Type.NORMALIZED_POWER),
+                        // Lap avg / NP (not ride-wide) so the readout tracks the current interval —
+                        // a manual lap is taken at each interval so this is the effort in progress.
+                        karoo.streamDataFlow(DataType.Type.POWER_LAP),
+                        karoo.streamDataFlow(DataType.Type.NORMALIZED_POWER_LAP),
                     ) { remain, avg, np ->
                         val cfg = configFlow.value
                         val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)

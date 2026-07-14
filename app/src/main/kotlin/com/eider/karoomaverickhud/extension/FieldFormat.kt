@@ -408,8 +408,10 @@ data class ClimbOverlay(
 )
 
 /**
- * Mid-workout centre overlay: the interval countdown plus ride avg and NP power, so the rider keeps
- * the workout essentials while flipping through non-workout pages. [remaining] carries the same 1 s
+ * Mid-workout centre overlay: the interval countdown plus lap avg and NP power (the current
+ * interval's effort), so the rider keeps the workout essentials while flipping through non-workout
+ * pages. [avg]/[np] are marked with the power glyph and a small "avg"/"NP" tag by the renderer.
+ * [remaining] carries the same 1 s
  * lead as the INTERVAL field ([FieldFormat] INTERVAL_TIME_LEAD_MS) so the two never disagree.
  * [blink] is true for the interval's last five displayed seconds — the renderer flashes the
  * countdown so an imminent step change registers in peripheral vision. [avg]/[np] are full
@@ -671,8 +673,9 @@ object FieldFormat {
     }
 
     /**
-     * Mid-workout overlay from the interval-countdown stream plus the ride's average and normalized
-     * power. The countdown mirrors the INTERVAL field exactly: same [DataType.Field.WORKOUT_TIME_TO_STEP_FINISH]
+     * Mid-workout overlay from the interval-countdown stream plus the lap's average and normalized
+     * power (the caller feeds the lap streams, so this reads the current interval, not the whole
+     * ride). The countdown mirrors the INTERVAL field exactly: same [DataType.Field.WORKOUT_TIME_TO_STEP_FINISH]
      * milliseconds, same [INTERVAL_TIME_LEAD_MS] lead, clamped at 0. [WorkoutOverlay.blink] arms for
      * the last [WORKOUT_BLINK_WINDOW_MS] of *displayed* countdown (5 s per the design), and only while
      * the stream is actually carrying a time — a workout without a timed step doesn't flash. The
