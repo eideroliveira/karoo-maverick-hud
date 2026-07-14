@@ -207,11 +207,16 @@ class HudScreen : Screen(420f, 150f) {
 
     // Mid-workout overlay (a centre overlay on every page but the workout page): a cyan "INTERVAL"
     // caption, the interval countdown in the medium value face (blinking over its final 5 s), and a
-    // zone-coloured avg/NP power pair astride the centre line.
+    // zone-coloured lap avg/NP power pair astride the centre line. Each power cell is marked with the
+    // power glyph plus a small "avg"/"NP" tag (no spelled-out label) — see [renderWorkout].
     private val workoutLabel = Text()
     private val workoutTime = Text()
+    private val workoutAvgIcon = Image()
     private val workoutAvg = Text()
+    private val workoutAvgTag = Text()
+    private val workoutNpIcon = Image()
     private val workoutNp = Text()
+    private val workoutNpTag = Text()
 
     // Gear-change flash (a centre overlay shown for ~3 s after a shift): a dim "GEAR" caption over
     // the new chainring/cassette ratio in the large value face, tinted by how the ratio moved
@@ -407,12 +412,35 @@ class HudScreen : Screen(420f, 150f) {
             .setForegroundColor(EvsColor.White.rgba)
             .setVisibility(false)
             .addTo(this)
+        // avg (left) and NP (right) each render as [power glyph][value][small tag], laid out
+        // left-aligned from a per-cell origin computed in renderWorkout (so the pair reads the same
+        // order both sides). The icons share the power ImgSrc; tags use the small unit face.
+        workoutAvgIcon
+            .setResource(imgPower)
+            .setWidthHeight(iconW, iconW)
+            .setForegroundColor(WHITE_RGBA)
+            .setVisibility(false)
+            .addTo(this)
         workoutAvg
             .setText("")
             .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.right)
+            .setTextAlign(Align.left)
             .setXY(screenW / 2f - WORKOUT_POWER_GAP, WORKOUT_POWER_Y)
             .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        workoutAvgTag
+            .setText("")
+            .setResource(unitFontBig)
+            .setTextAlign(Align.left)
+            .setXY(screenW / 2f - WORKOUT_POWER_GAP, WORKOUT_POWER_TAG_Y)
+            .setForegroundColor(WHITE_RGBA)
+            .setVisibility(false)
+            .addTo(this)
+        workoutNpIcon
+            .setResource(imgPower)
+            .setWidthHeight(iconW, iconW)
+            .setForegroundColor(WHITE_RGBA)
             .setVisibility(false)
             .addTo(this)
         workoutNp
@@ -421,6 +449,14 @@ class HudScreen : Screen(420f, 150f) {
             .setTextAlign(Align.left)
             .setXY(screenW / 2f + WORKOUT_POWER_GAP, WORKOUT_POWER_Y)
             .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
+        workoutNpTag
+            .setText("")
+            .setResource(unitFontBig)
+            .setTextAlign(Align.left)
+            .setXY(screenW / 2f + WORKOUT_POWER_GAP, WORKOUT_POWER_TAG_Y)
+            .setForegroundColor(WHITE_RGBA)
             .setVisibility(false)
             .addTo(this)
     }
@@ -768,19 +804,47 @@ class HudScreen : Screen(420f, 150f) {
     /**
      * Draw the mid-workout readout centred over the current page: the "INTERVAL" caption, the
      * countdown (hidden on the blink's off phase during the interval's last seconds), and the
-     * zone-coloured "AVG n" / "NP n" pair astride the centre line.
+     * lap avg / NP power pair astride the centre line — each marked with the power glyph and a small
+     * "avg"/"NP" tag rather than a spelled-out label. The left cell is right-anchored just inboard of
+     * the centre gap, the right cell left-anchored just outboard of it.
      */
     private fun renderWorkout(workout: WorkoutOverlay, blinkVisible: Boolean) {
         workoutBlinking = workout.blink
         workoutLabel.setText("INTERVAL").setVisibility(true)
         workoutTime.setText(workout.remaining)
             .setVisibility(!workout.blink || blinkVisible)
-        workoutAvg.setText("AVG ${workout.avg.value}")
-            .setForegroundColor(colorRgba(workout.avg.color))
-            .setVisibility(true)
-        workoutNp.setText("NP ${workout.np.value}")
-            .setForegroundColor(colorRgba(workout.np.color))
-            .setVisibility(true)
+        layoutWorkoutPower(workoutAvgIcon, workoutAvg, workoutAvgTag, workout.avg, "avg",
+            rightEdge = screenW / 2f - WORKOUT_POWER_GAP)
+        layoutWorkoutPower(workoutNpIcon, workoutNp, workoutNpTag, workout.np, "NP",
+            leftEdge = screenW / 2f + WORKOUT_POWER_GAP)
+    }
+
+    /**
+     * Lay a workout power cell — [power glyph][value][small tag], left-to-right — from either a
+     * [rightEdge] (the group ends there) or a [leftEdge] (it starts there). Widths come from the
+     * value/tag's measured content, refreshed by the setText calls here, so the cell hugs whatever
+     * the number is. The glyph's grey is baked into the asset, so it passes white as a no-op.
+     */
+    private fun layoutWorkoutPower(
+        icon: Image,
+        value: Text,
+        tag: Text,
+        cell: HudCell,
+        tagLabel: String,
+        rightEdge: Float? = null,
+        leftEdge: Float? = null,
+    ) {
+        value.setText(cell.value).setForegroundColor(colorRgba(cell.color))
+        tag.setText(tagLabel)
+        val valueW = value.getMeasuredContentWidth()
+        val tagW = tag.getMeasuredContentWidth()
+        val gap = iconTextGap
+        val totalW = iconW + gap + valueW + gap + tagW
+        val x0 = leftEdge ?: (rightEdge!! - totalW)
+        icon.setWidthHeight(iconW, iconW).setForegroundColor(WHITE_RGBA)
+            .setXY(x0, WORKOUT_POWER_ICON_Y).setVisibility(true)
+        value.setXY(x0 + iconW + gap, WORKOUT_POWER_Y).setVisibility(true)
+        tag.setXY(x0 + iconW + gap + valueW + gap, WORKOUT_POWER_TAG_Y).setVisibility(true)
     }
 
     /** Hide every workout-overlay element (outside a workout, or on the workout page itself). */
@@ -788,8 +852,12 @@ class HudScreen : Screen(420f, 150f) {
         workoutBlinking = false
         workoutLabel.setVisibility(false)
         workoutTime.setVisibility(false)
+        workoutAvgIcon.setVisibility(false)
         workoutAvg.setVisibility(false)
+        workoutAvgTag.setVisibility(false)
+        workoutNpIcon.setVisibility(false)
         workoutNp.setVisibility(false)
+        workoutNpTag.setVisibility(false)
     }
 
     /** Draw the gear-change flash centred over the current page: the "GEAR" caption + tinted ratio. */
@@ -1041,6 +1109,10 @@ class HudScreen : Screen(420f, 150f) {
         private const val WORKOUT_LABEL_Y = 8f
         private const val WORKOUT_TIME_Y = 32f
         private const val WORKOUT_POWER_Y = 92f
+        // The 14px glyph and the smaller tag face sit a touch below the value's top so all three
+        // centre against the taller value digits on the power row.
+        private const val WORKOUT_POWER_ICON_Y = WORKOUT_POWER_Y + 4f
+        private const val WORKOUT_POWER_TAG_Y = WORKOUT_POWER_Y + 3f
         private const val WORKOUT_POWER_GAP = 14f
         // Half-period of the countdown blink (its final 5 s): 500 ms off/on — urgent but readable.
         private const val WORKOUT_BLINK_HALF_MS = 500L

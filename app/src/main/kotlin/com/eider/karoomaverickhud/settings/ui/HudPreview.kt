@@ -420,8 +420,8 @@ private fun BoxScope.WorkoutOverlayCells(cfg: HudConfig) {
                     values = mapOf(io.hammerhead.karooext.models.DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 5_800.0), // → "0:04", blinking
                 ),
             ),
-            avgPowerState = streaming(io.hammerhead.karooext.models.DataType.Type.AVERAGE_POWER, cfg.ftp * 0.86),
-            npState = streaming(io.hammerhead.karooext.models.DataType.Type.NORMALIZED_POWER, cfg.ftp * 0.92),
+            avgPowerState = streaming(io.hammerhead.karooext.models.DataType.Type.POWER_LAP, cfg.ftp * 0.86),
+            npState = streaming(io.hammerhead.karooext.models.DataType.Type.NORMALIZED_POWER_LAP, cfg.ftp * 0.92),
             zones = zones,
         )
     }
@@ -442,12 +442,24 @@ private fun BoxScope.WorkoutOverlayCells(cfg: HudConfig) {
             family = CondFamily, letterSpacing = 1.sp, maxLines = 1, softWrap = false)
         KText(if (!overlay.blink || blinkOn) overlay.remaining else " ", color = K.zWhite, size = 33.sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+        // Each power cell is marked with the bolt glyph (it's power) plus a small "avg"/"NP" tag to
+        // tell the two apart — no spelled-out label. Mirrors HudScreen.renderWorkout.
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            KText("AVG ${overlay.avg.value}", color = overlay.avg.color.toComposeColor(), size = 20.sp,
-                weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
-            KText("NP ${overlay.np.value}", color = overlay.np.color.toComposeColor(), size = 20.sp,
-                weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+            WorkoutPowerCell(overlay.avg, "avg")
+            WorkoutPowerCell(overlay.np, "NP")
         }
+    }
+}
+
+/** One workout-overlay power cell: the bolt glyph, the zone-coloured value, then a small tag. */
+@Composable
+private fun WorkoutPowerCell(cell: com.eider.karoomaverickhud.extension.HudCell, tag: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        KIcon("bolt", 11.dp, Lens.icon, stroke = 2.4f)
+        KText(cell.value, color = cell.color.toComposeColor(), size = 20.sp,
+            weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+        KText(tag, color = K.zWhite, size = 12.sp, weight = FontWeight.SemiBold,
+            family = CondFamily, maxLines = 1, softWrap = false)
     }
 }
 
