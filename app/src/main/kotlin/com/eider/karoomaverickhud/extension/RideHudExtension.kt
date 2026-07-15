@@ -312,10 +312,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         // Mid-workout centre overlay: the interval countdown plus avg/NP power, drawn on every page
         // except the workout page itself (the renderer suppresses it there via
-        // [HudSnapshot.workoutPageIndex]). Gated on workout-active so its streams cost nothing
-        // otherwise, and dropped in critical battery mode — its per-second countdown would defeat
-        // the frame dedup that mode leans on.
-        val workoutOverlayFlow = combine(workoutActiveFlow, Eco.critical) { active, critical -> active && !critical }
+        // [HudSnapshot.workoutPageIndex]). Gated on the workout-overlay switch and workout-active so
+        // its streams cost nothing otherwise, and dropped in critical battery mode — its per-second
+        // countdown would defeat the frame dedup that mode leans on.
+        val workoutOverlayEnabledFlow = configFlow.map { it.workoutOverlayEnabled }.distinctUntilChanged()
+        val workoutOverlayFlow = combine(workoutOverlayEnabledFlow, workoutActiveFlow, Eco.critical) { on, active, critical -> on && active && !critical }
             .distinctUntilChanged()
             .flatMapLatest { enabled ->
                 if (!enabled) {

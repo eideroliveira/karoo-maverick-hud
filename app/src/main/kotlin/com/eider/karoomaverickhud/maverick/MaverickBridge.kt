@@ -93,6 +93,10 @@ class MaverickBridge(
     // map is shown. Starts on the middle (200 m) look-ahead.
     @Volatile private var trajZoomIndex: Int = 1
 
+    // Whether the workout overlay's lap avg/NP power pair is shown. Flipped by a temple-pad tap while
+    // the workout overlay is showing (and no trajectory owns the tap); the countdown always stays.
+    @Volatile private var showWorkoutPower: Boolean = true
+
     // The pinned-page index from the last snapshot, so we snap to a pinned page (a live Strava
     // segment) only on the rising edge (and when the pin changes) rather than yanking back every
     // tick — the rider can still flip away mid-segment. Null means nothing is pinned.
@@ -379,8 +383,9 @@ class MaverickBridge(
      * Temple-pad gestures.
      *  - Closed: long-tap opens the control window; forward/back flip pages (in any page mode —
      *    AUTO keeps cycling from wherever they land). A bare tap cycles the zoom while the
-     *    trajectory map is showing, and is otherwise swallowed so accidental pad touches don't
-     *    bring up the window mid-ride.
+     *    trajectory map is showing, else toggles the workout overlay's avg/NP power while that
+     *    overlay is showing, and is otherwise swallowed so accidental pad touches don't bring up
+     *    the window mid-ride.
      *  - Open: the window focuses one item at a time (Brightness → Auto → Radar → Trajectory → Race);
      *    forward cycles the focus, tap toggles the focused value (brightness steps +20% and wraps),
      *    backward dismisses. Long-tap is reserved for opening, so it's a no-op while open.
@@ -400,13 +405,33 @@ class MaverickBridge(
             TouchDirection.longTap -> toggleControl()
             TouchDirection.forward -> changePage(+1)
             TouchDirection.backward -> changePage(-1)
-            TouchDirection.tap -> if (trajectoryShowing()) cycleTrajectoryZoom()
+            TouchDirection.tap -> when {
+                trajectoryShowing() -> cycleTrajectoryZoom()
+                workoutShowing() -> toggleWorkoutPower()
+            }
             else -> {}
         }
     }
 
     /** Whether the trajectory map is currently drawn (centre overlay), so a tap means "change zoom". */
     private fun trajectoryShowing(): Boolean = lastSnapshot.trajectory != null
+
+    /**
+     * Whether the workout overlay is the centre overlay currently drawn — a workout is live and we're
+     * not on the workout page (where it's suppressed) and no trajectory is taking the centre (the
+     * trajectory outranks it in the renderer). A tap then toggles its avg/NP power pair.
+     */
+    private fun workoutShowing(): Boolean {
+        val snap = lastSnapshot
+        if (snap.workout == null || snap.trajectory != null) return false
+        return snap.workoutPageIndex == null || snap.pageIndex != snap.workoutPageIndex
+    }
+
+    /** Flip the workout overlay's avg/NP power pair; the screen reads it live and re-renders next frame. */
+    private fun toggleWorkoutPower() {
+        showWorkoutPower = !showWorkoutPower
+        hudScreen.setWorkoutPowerVisible(showWorkoutPower)
+    }
 
     /**
      * Step the trajectory zoom to the next look-ahead distance. The screen reads the zoom live and
