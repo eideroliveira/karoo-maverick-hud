@@ -249,11 +249,11 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                 }
             }
 
-            // Route-aware auto-overlays — drawn over the clear centre of whatever page is showing
+            // Centre auto-overlays — drawn over the clear centre of whatever page is showing
             // (fixed layouts / a drawn map), so they're on/off switches rather than editable tabs.
             // Each appears automatically when its trigger is live (approaching or on a climb /
-            // descending).
-            KSectionLabel("Route auto-pages")
+            // descending / running a structured workout).
+            KSectionLabel("Auto-overlays")
             CardBlock {
                 KRow {
                     KIconChip("distance")
@@ -263,13 +263,35 @@ fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map
                     }
                     KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
                 }
-                KRow(last = true) {
+                KRow {
                     KIconChip("arrows")
                     Column(Modifier.weight(1f)) {
                         KText("Trajectory map", color = K.text, size = 19.sp, weight = FontWeight.Medium)
                         KText("Heading-up map of the road ahead — auto-shows on descents", color = K.text2, size = 15.sp)
                     }
                     KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
+                }
+                KRow(last = true) {
+                    KIconChip("power")
+                    Column(Modifier.weight(1f)) {
+                        KText("Workout overlay", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Interval countdown + lap avg/NP power over other pages while a workout runs — tap the glasses to toggle the power pair", color = K.text2, size = 15.sp)
+                    }
+                    KSwitch(cfg.workoutOverlayEnabled) { scope.launch { HudPreferences.setWorkoutOverlayEnabled(ctx, it) } }
+                }
+            }
+
+            // Battery-saver (ECO) master switch, mirrored from the Display screen so it's reachable
+            // alongside the overlays. The auto-engage threshold lives on the Display screen.
+            KSectionLabel("Battery saver")
+            CardBlock {
+                KRow(last = true) {
+                    KIconChip("battery")
+                    Column(Modifier.weight(1f)) {
+                        KText("ECO mode", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                        KText("Dim, slow the HUD and blank when paused to stretch glasses runtime", color = K.text2, size = 15.sp)
+                    }
+                    KSwitch(cfg.saverEnabled) { scope.launch { HudPreferences.setSaverEnabled(ctx, it) } }
                 }
             }
 
@@ -539,7 +561,7 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
             }
         }
 
-        KSectionLabel("Route")
+        KSectionLabel("Auto-overlays")
         CardBlock {
             KRow {
                 KIconChip("distance")
@@ -549,13 +571,21 @@ fun DisplayScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope) {
                 }
                 KSwitch(cfg.radarEnabled) { scope.launch { HudPreferences.setRadarEnabled(ctx, it) } }
             }
-            KRow(last = true) {
+            KRow {
                 KIconChip("arrows")
                 Column(Modifier.weight(1f)) {
                     KText("Trajectory map", color = K.text, size = 19.sp, weight = FontWeight.Medium)
                     KText("Draw the road ahead to read curves — auto-shows on descents", color = K.text2, size = 15.sp)
                 }
                 KSwitch(cfg.trajectoryEnabled) { scope.launch { HudPreferences.setTrajectoryEnabled(ctx, it) } }
+            }
+            KRow(last = true) {
+                KIconChip("power")
+                Column(Modifier.weight(1f)) {
+                    KText("Workout overlay", color = K.text, size = 19.sp, weight = FontWeight.Medium)
+                    KText("Interval countdown + lap avg/NP power over other pages while a workout runs — tap the glasses to toggle the power pair", color = K.text2, size = 15.sp)
+                }
+                KSwitch(cfg.workoutOverlayEnabled) { scope.launch { HudPreferences.setWorkoutOverlayEnabled(ctx, it) } }
             }
         }
 

@@ -254,6 +254,10 @@ class HudScreen : Screen(420f, 150f) {
     // [setTrajectoryZoom] while the trajectory overlay is shown.
     @Volatile private var trajLookaheadM = 200f
 
+    // Whether the workout overlay's lap avg/NP power pair is drawn. Toggled by a temple-pad tap via
+    // [setWorkoutPowerVisible] while the workout overlay is showing; the countdown always stays.
+    @Volatile private var showWorkoutPower = true
+
     fun apply(next: HudSnapshot) {
         snapshot = next
     }
@@ -276,6 +280,11 @@ class HudScreen : Screen(420f, 150f) {
     /** Set how many metres of road ahead the trajectory overlay shows (zoom), cycled by temple-pad taps. */
     fun setTrajectoryZoom(lookaheadMeters: Float) {
         trajLookaheadM = lookaheadMeters
+    }
+
+    /** Show or hide the workout overlay's lap avg/NP power pair, toggled by a temple-pad tap. */
+    fun setWorkoutPowerVisible(visible: Boolean) {
+        showWorkoutPower = visible
     }
 
     private fun UIElement.addTo(screen: Screen): UIElement = also { screen.add(it) }
@@ -786,10 +795,24 @@ class HudScreen : Screen(420f, 150f) {
         workoutBlinking = workout.blink
         workoutTime.setText(workout.remaining)
             .setVisibility(!workout.blink || blinkVisible)
-        layoutWorkoutPower(workoutAvgIcon, workoutAvg, workoutAvgTag, workout.avg, "avg",
-            rightEdge = screenW / 2f - WORKOUT_POWER_GAP)
-        layoutWorkoutPower(workoutNpIcon, workoutNp, workoutNpTag, workout.np, "NP",
-            leftEdge = screenW / 2f + WORKOUT_POWER_GAP)
+        if (showWorkoutPower) {
+            layoutWorkoutPower(workoutAvgIcon, workoutAvg, workoutAvgTag, workout.avg, "avg",
+                rightEdge = screenW / 2f - WORKOUT_POWER_GAP)
+            layoutWorkoutPower(workoutNpIcon, workoutNp, workoutNpTag, workout.np, "NP",
+                leftEdge = screenW / 2f + WORKOUT_POWER_GAP)
+        } else {
+            hideWorkoutPower()
+        }
+    }
+
+    /** Hide just the avg/NP power pair (a temple-pad tap toggled it off), leaving the countdown. */
+    private fun hideWorkoutPower() {
+        workoutAvgIcon.setVisibility(false)
+        workoutAvg.setVisibility(false)
+        workoutAvgTag.setVisibility(false)
+        workoutNpIcon.setVisibility(false)
+        workoutNp.setVisibility(false)
+        workoutNpTag.setVisibility(false)
     }
 
     /**
@@ -824,12 +847,7 @@ class HudScreen : Screen(420f, 150f) {
     private fun hideWorkout() {
         workoutBlinking = false
         workoutTime.setVisibility(false)
-        workoutAvgIcon.setVisibility(false)
-        workoutAvg.setVisibility(false)
-        workoutAvgTag.setVisibility(false)
-        workoutNpIcon.setVisibility(false)
-        workoutNp.setVisibility(false)
-        workoutNpTag.setVisibility(false)
+        hideWorkoutPower()
     }
 
     /** Hide every on-climb-overlay element (when not on a climb). */
@@ -1010,8 +1028,9 @@ class HudScreen : Screen(420f, 150f) {
     }
 
     /**
-     * Folds glasses-side UI state that isn't in the snapshot (control window + trajectory zoom) into
-     * one int, so onUpdateUI re-renders on a change even when the pushed snapshot is unchanged.
+     * Folds glasses-side UI state that isn't in the snapshot (control window + trajectory zoom +
+     * workout-power toggle) into one int, so onUpdateUI re-renders on a change even when the pushed
+     * snapshot is unchanged.
      */
     private fun controlSignature(): Int {
         var h = if (controlOpen) 1 else 0
@@ -1019,6 +1038,7 @@ class HudScreen : Screen(420f, 150f) {
         h = h * 131 + (if (ctrlAuto) 1 else 0)
         h = h * 131 + ctrlSignal
         h = h * 131 + trajLookaheadM.toInt()
+        h = h * 131 + (if (showWorkoutPower) 1 else 0)
         h = h * 131 + ctrlFocus
         h = h * 131 + (if (ctrlRadar) 1 else 0)
         h = h * 131 + (if (ctrlTraj) 1 else 0)

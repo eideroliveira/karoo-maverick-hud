@@ -108,6 +108,13 @@ data class HudConfig(
      */
     val trajectoryEnabled: Boolean,
     /**
+     * Whether the mid-workout centre overlay is active. When on (and a structured workout is loaded),
+     * the glasses draw the interval countdown plus lap avg/NP power over the centre of every page but
+     * the workout page. A single temple-pad tap on the overlay toggles the avg/NP pair without
+     * touching this switch. See [FieldFormat.workoutOverlay].
+     */
+    val workoutOverlayEnabled: Boolean,
+    /**
      * Race mode. When on, only the race-flagged numbered pages (see [racePages]) plus the dynamic
      * auto-pages (workout/segment) and centre overlays (climb radar/profile, trajectory) are shown,
      * and paging auto-cycles regardless of [pageMode] — a hands-off layout for racing. See
@@ -195,6 +202,7 @@ data class HudConfig(
             saverThresholdPct = com.eider.karoomaverickhud.maverick.SaverTuning.DEFAULT_THRESHOLD_PCT,
             radarEnabled = true,
             trajectoryEnabled = true,
+            workoutOverlayEnabled = true,
             raceMode = false,
             racePages = emptyList(),
         )
@@ -239,6 +247,7 @@ object HudPreferences {
     private val KEY_SAVER_THRESHOLD = intPreferencesKey("saver_threshold_pct")
     private val KEY_RADAR_ENABLED = booleanPreferencesKey("radar_enabled")
     private val KEY_TRAJECTORY_ENABLED = booleanPreferencesKey("trajectory_enabled")
+    private val KEY_WORKOUT_OVERLAY_ENABLED = booleanPreferencesKey("workout_overlay_enabled")
     private val KEY_RACE_MODE = booleanPreferencesKey("race_mode")
     private val KEY_RACE_PAGES = stringPreferencesKey("race_pages_json")
 
@@ -274,6 +283,7 @@ object HudPreferences {
             saverThresholdPct = (prefs[KEY_SAVER_THRESHOLD] ?: HudConfig.DEFAULT.saverThresholdPct).coerceIn(0, 100),
             radarEnabled = prefs[KEY_RADAR_ENABLED] ?: HudConfig.DEFAULT.radarEnabled,
             trajectoryEnabled = prefs[KEY_TRAJECTORY_ENABLED] ?: HudConfig.DEFAULT.trajectoryEnabled,
+            workoutOverlayEnabled = prefs[KEY_WORKOUT_OVERLAY_ENABLED] ?: HudConfig.DEFAULT.workoutOverlayEnabled,
             raceMode = prefs[KEY_RACE_MODE] ?: HudConfig.DEFAULT.raceMode,
             racePages = prefs[KEY_RACE_PAGES]?.let { decodeBools(it) } ?: HudConfig.DEFAULT.racePages,
         )
@@ -341,6 +351,10 @@ object HudPreferences {
 
     suspend fun setTrajectoryEnabled(context: Context, enabled: Boolean) {
         context.dataStore.edit { it[KEY_TRAJECTORY_ENABLED] = enabled }
+    }
+
+    suspend fun setWorkoutOverlayEnabled(context: Context, enabled: Boolean) {
+        context.dataStore.edit { it[KEY_WORKOUT_OVERLAY_ENABLED] = enabled }
     }
 
     suspend fun setRaceMode(context: Context, enabled: Boolean) {
