@@ -60,7 +60,7 @@ import kotlin.random.Random
 data class DemoVal(val display: String, val numeric: Double?)
 
 /** The centre overlay a preview scene draws over the page's clear centre (mirrors HudScreen). */
-enum class PreviewOverlay { NONE, RADAR, TRAJECTORY, WORKOUT }
+enum class PreviewOverlay { NONE, RADAR, TRAJECTORY }
 
 /**
  * One scene the hub's live preview cycles through: a data page ([fields]) plus an optional centre
@@ -89,7 +89,6 @@ fun previewScenes(cfg: HudConfig): List<PreviewScene> {
     return buildList {
         cfg.pages.forEachIndexed { i, p -> add(PreviewScene("PAGE ${i + 1}", p.take(cap))) }
         add(PreviewScene("CLIMB", cfg.climbPage.take(cap)))
-        add(PreviewScene("WORKOUT OVERLAY", base, PreviewOverlay.WORKOUT))
         if (cfg.radarEnabled) add(PreviewScene("NEXT-CLIMB RADAR", base, PreviewOverlay.RADAR))
         if (cfg.trajectoryEnabled) add(PreviewScene("TRAJECTORY", base, PreviewOverlay.TRAJECTORY))
     }
@@ -208,7 +207,7 @@ private fun LensCell(fieldId: String?, values: Map<String, DemoVal>, cfg: HudCon
     val tag = if (showIcon) FieldFormat.iconTagFor(fieldId) else ""
     val labelOrIcon: @Composable () -> Unit = {
         if (showIcon) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 KIcon(field?.icon ?: "bolt", 12.dp, Lens.icon, stroke = 2.4f)
                 if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 13.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
             }
@@ -281,7 +280,6 @@ fun GlassesPreview(
         when (scene.overlay) {
             PreviewOverlay.RADAR -> RadarOverlayCells(cfg)
             PreviewOverlay.TRAJECTORY -> TrajectoryOverlayCells()
-            PreviewOverlay.WORKOUT -> WorkoutOverlayCells(cfg)
             PreviewOverlay.NONE -> {}
         }
         if (totalPages > 1) {
@@ -349,9 +347,9 @@ private fun BoxScope.RadarOverlayCells(cfg: HudConfig) {
     ) {
         KText("NEXT CLIMB", color = K.zCyan, size = 16.sp, weight = FontWeight.Bold,
             family = CondFamily, letterSpacing = 1.sp, maxLines = 1, softWrap = false)
-        KText("↔ ${radar.distance}   ${radar.eta}", color = K.zWhite, size = 20.sp,
+        KText("${radar.distance}   ${radar.eta}", color = K.zWhite, size = 20.sp,
             weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
-        KText("${radar.grade}   ↔ ${radar.length}", color = radar.gradeColor.toComposeColor(),
+        KText("${radar.grade}   ${radar.length}", color = radar.gradeColor.toComposeColor(),
             size = 20.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
     }
 }
@@ -400,71 +398,8 @@ private fun BoxScope.TrajectoryOverlayCells() {
 }
 
 /**
- * The mid-workout centre overlay, mirroring HudScreen.renderWorkout: a cyan "INTERVAL" caption, the
- * interval countdown in the big value face, and the zone-coloured "AVG n" / "NP n" pair astride the
- * centre line. Demo streams run through the real [FieldFormat.workoutOverlay] so strings, the 1 s
- * countdown lead and the zone colours read exactly like the glasses — and the demo countdown sits
- * inside the 5 s blink window, so the preview shows the flash the rider will see at an interval's end.
- */
-@Composable
-private fun BoxScope.WorkoutOverlayCells(cfg: HudConfig) {
-    val overlay = remember(cfg) {
-        val zones = com.eider.karoomaverickhud.extension.ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
-        fun streaming(id: String, value: Double) = io.hammerhead.karooext.models.StreamState.Streaming(
-            io.hammerhead.karooext.models.DataPoint(dataTypeId = id, values = mapOf(id to value)),
-        )
-        FieldFormat.workoutOverlay(
-            remainState = io.hammerhead.karooext.models.StreamState.Streaming(
-                io.hammerhead.karooext.models.DataPoint(
-                    dataTypeId = io.hammerhead.karooext.models.DataType.Type.WORKOUT_REMAINING_INTERVAL_DURATION,
-                    values = mapOf(io.hammerhead.karooext.models.DataType.Field.WORKOUT_TIME_TO_STEP_FINISH to 5_800.0), // → "0:04", blinking
-                ),
-            ),
-            avgPowerState = streaming(io.hammerhead.karooext.models.DataType.Type.POWER_LAP, cfg.ftp * 0.86),
-            npState = streaming(io.hammerhead.karooext.models.DataType.Type.NORMALIZED_POWER_LAP, cfg.ftp * 0.92),
-            zones = zones,
-        )
-    }
-    // The glasses flash the countdown over the interval's last 5 s (500 ms half-period) — mirror it.
-    var blinkOn by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(500)
-            blinkOn = !blinkOn
-        }
-    }
-    Column(
-        Modifier.align(Alignment.Center),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        KText("INTERVAL", color = K.zCyan, size = 16.sp, weight = FontWeight.Bold,
-            family = CondFamily, letterSpacing = 1.sp, maxLines = 1, softWrap = false)
-        KText(if (!overlay.blink || blinkOn) overlay.remaining else " ", color = K.zWhite, size = 33.sp,
-            weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
-        // Each power cell is marked with the bolt glyph (it's power) plus a small "avg"/"NP" tag to
-        // tell the two apart — no spelled-out label. Mirrors HudScreen.renderWorkout.
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-            WorkoutPowerCell(overlay.avg, "avg")
-            WorkoutPowerCell(overlay.np, "NP")
-        }
-    }
-}
-
-/** One workout-overlay power cell: the bolt glyph, the zone-coloured value, then a small tag. */
-@Composable
-private fun WorkoutPowerCell(cell: com.eider.karoomaverickhud.extension.HudCell, tag: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        KIcon("bolt", 11.dp, Lens.icon, stroke = 2.4f)
-        KText(cell.value, color = cell.color.toComposeColor(), size = 20.sp,
-            weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
-        KText(tag, color = K.zWhite, size = 12.sp, weight = FontWeight.SemiBold,
-            family = CondFamily, maxLines = 1, softWrap = false)
-    }
-}
-
-/**
- * Editable lens: every slot up to [slotCount] is a tappable target. Filled slots show the field;
+ * Editable lens: every slot up to [slotCount] is a tappable target.
+Filled slots show the field;
  * the first empty slot is an "Add" affordance, later empties read "Empty". [selected] highlights
  * the active slot. Mirrors screens2.jsx EditableHud.
  */
@@ -554,7 +489,7 @@ private fun EditSlot(
             val tag = if (showIcon) fieldId?.let { FieldFormat.iconTagFor(it) }.orEmpty() else ""
             val labelOrIcon: @Composable () -> Unit = {
                 if (showIcon) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.5.dp)) {
                         KIcon(field.icon, 8.dp, Lens.icon, stroke = 2.4f)
                         if (tag.isNotEmpty()) KText(tag, color = K.zWhite, size = 8.sp, weight = FontWeight.SemiBold, family = CondFamily, maxLines = 1, softWrap = false)
                     }

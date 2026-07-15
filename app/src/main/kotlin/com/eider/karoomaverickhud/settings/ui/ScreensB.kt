@@ -29,13 +29,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,11 +62,12 @@ private fun <T> swap(list: List<T>, a: Int, b: Int): List<T> =
 @Composable
 fun PagesScreen(cfg: HudConfig, ctx: Context, scope: CoroutineScope, values: Map<String, DemoVal>) {
     val slotCount = cellsForRows(cfg.rows)
-    var active by remember { mutableStateOf(0) } // numbered page index, or an auto-page sentinel
+    var active by remember { mutableIntStateOf(0) } // numbered page index, or an auto-page sentinel
     var picker by remember { mutableStateOf<Pair<Int, Int>?>(null) } // page, slot
     val pages = cfg.pages
     val isWorkout = active == WORKOUT_TAB
     val isSegment = active == SEGMENT_TAB
+    val isClimb = false // Legacy page no longer editable
     val isSpecial = active < 0
     val cur = if (isSpecial) active else active.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
     val curPage = when {

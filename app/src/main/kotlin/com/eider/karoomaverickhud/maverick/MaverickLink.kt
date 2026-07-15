@@ -32,10 +32,12 @@ object MaverickLink {
 
     fun install(context: Context, app: IEvsApp) {
         apiKey = runCatching {
-            val id = context.resources.getIdentifier("sdk", "raw", context.packageName)
+            // Prefer app.key if present, fallback to sdk.key
+            val id = context.resources.getIdentifier("app", "raw", context.packageName).takeIf { it != 0 }
+                ?: context.resources.getIdentifier("sdk", "raw", context.packageName)
             if (id != 0) context.resources.openRawResource(id).use { it.readBytes() } else null
         }.getOrNull()
-        Timber.i("sdk.key loaded: ${apiKey?.size ?: -1} bytes")
+        Timber.i("API key loaded: ${apiKey?.size ?: -1} bytes")
         applyApiKey(app)
 
         app.registerAppEvents(object : IEvsAppEvents {

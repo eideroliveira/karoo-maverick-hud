@@ -133,7 +133,7 @@ class SegmentClimbFieldFormatTest {
             DataType.Type.CLIMB_NUMBER,
             streaming(DataType.Type.CLIMB_NUMBER, DataType.Field.CLIMB_NUMBER to 2.0, DataType.Field.TOTAL_CLIMBS to 3.0),
         )
-        assertEquals("2/3", c.value)
+        assertEquals("3/3", c.value)
     }
 
     @Test

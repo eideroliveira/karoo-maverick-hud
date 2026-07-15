@@ -15,9 +15,11 @@ class HudPreviewBuilderTest {
 
     private val base = HudConfig.DEFAULT // ftp 200, idealCadence 90 → demo target 180 W / 90 rpm
 
+    // The mirror now returns one page per scene (numbered pages come first in the scene list), so the
+    // numbered page [page] is selected via sceneIndex and read from the snapshot's single page.
     private fun previewValue(pages: List<List<String>>, page: Int, cell: Int): String =
-        HudPreviewBuilder.snapshot(base.copy(pages = pages), seed = 1, pageIndex = 0)
-            .pages[page][cell].value
+        HudPreviewBuilder.snapshot(base.copy(pages = pages), seed = 1, sceneIndex = page)
+            .pages[0][cell].value
 
     @Test
     fun powerTileShowsCompositeWhenTargetFieldOnPage() {

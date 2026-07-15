@@ -653,11 +653,11 @@ object FieldFormat {
         val grade = gradeOf(gradeState)
         val avg = if (toEndM > 0.0) toTopM / toEndM * 100.0 else null
         val (endValue, endDim) = formatDistance(toEndM, imperial)
-        val current = dp.values[DataType.Field.CLIMB_NUMBER]?.toInt() ?: 0
+        val current = dp.values[DataType.Field.CLIMB_NUMBER]?.toInt()
         val total = dp.values[DataType.Field.TOTAL_CLIMBS]?.toInt() ?: 0
         val label = when {
-            total > 0 -> "CLIMB $current/$total"
-            current > 0 -> "CLIMB $current"
+            total > 0 && current != null -> "CLIMB ${current + 1}/$total"
+            current != null -> "CLIMB ${current + 1}"
             else -> "CLIMB"
         }
         return ClimbOverlay(
@@ -792,10 +792,10 @@ object FieldFormat {
             }
             FieldKind.CLIMB_STEPS -> {
                 val total = raw?.values?.get(DataType.Field.TOTAL_CLIMBS)?.toInt() ?: 0
-                val current = (raw?.values?.get(DataType.Field.CLIMB_NUMBER) ?: 0.0).toInt()
+                val current = raw?.values?.get(DataType.Field.CLIMB_NUMBER)?.toInt()
                 val text = when {
-                    total > 0 -> "$current/$total"
-                    current > 0 -> "$current"
+                    total > 0 && current != null -> "${current + 1}/$total"
+                    current != null -> "${current + 1}"
                     else -> "--"
                 }
                 HudCell(text, unit, HudColor.WHITE, spec.icon)
@@ -805,8 +805,8 @@ object FieldFormat {
             FieldKind.STEPS -> {
                 // Workout progress as "current/total"; the step count only streams mid-workout.
                 val total = raw?.values?.get(DataType.Field.WORKOUT_STEP_COUNT)?.toInt() ?: 0
-                val current = (raw?.values?.get(DataType.Field.WORKOUT_CURRENT_STEP) ?: 0.0).toInt()
-                HudCell(if (total > 0) "$current/$total" else "--", unit, HudColor.WHITE, spec.icon)
+                val current = raw?.values?.get(DataType.Field.WORKOUT_CURRENT_STEP)?.toInt()
+                HudCell(if (total > 0 && current != null) "${current + 1}/$total" else "--", unit, HudColor.WHITE, spec.icon)
             }
             FieldKind.BALANCE -> HudCell(formatBalance(raw), unit, balanceColor(raw), spec.icon)
             FieldKind.GEARS -> {

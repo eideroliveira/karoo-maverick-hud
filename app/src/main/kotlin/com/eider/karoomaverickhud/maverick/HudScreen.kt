@@ -208,11 +208,10 @@ class HudScreen : Screen(420f, 150f) {
     private val climbBars = Array(ClimbProfile.BUCKETS) { Rect() }
     private val climbMarker = Rect()
 
-    // Mid-workout overlay (a centre overlay on every page but the workout page): a cyan "INTERVAL"
-    // caption, the interval countdown in the medium value face (blinking over its final 5 s), and a
+    // Mid-workout overlay (a centre overlay on every page but the workout page): the
+    // interval countdown in the medium value face (blinking over its final 5 s), and a
     // zone-coloured lap avg/NP power pair astride the centre line. Each power cell is marked with the
     // power glyph plus a small "avg"/"NP" tag (no spelled-out label) — see [renderWorkout].
-    private val workoutLabel = Text()
     private val workoutTime = Text()
     private val workoutAvgIcon = Image()
     private val workoutAvg = Text()
@@ -374,16 +373,8 @@ class HudScreen : Screen(420f, 150f) {
         setupWorkout()
     }
 
-    /** Create the mid-workout overlay's caption, countdown and avg/NP power pair (all hidden). */
+    /** Create the mid-workout overlay's countdown and avg/NP power pair (all hidden). */
     private fun setupWorkout() {
-        workoutLabel
-            .setText("")
-            .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.center)
-            .setXY(screenW / 2f, WORKOUT_LABEL_Y)
-            .setForegroundColor(CYAN_RGBA)
-            .setVisibility(false)
-            .addTo(this)
         // The countdown runs the medium (33px) value face — it's the overlay's headline and has to
         // read at a glance mid-effort; the chrome around it stays on the stock Small font.
         workoutTime
@@ -792,7 +783,6 @@ class HudScreen : Screen(420f, 150f) {
      */
     private fun renderWorkout(workout: WorkoutOverlay, blinkVisible: Boolean) {
         workoutBlinking = workout.blink
-        workoutLabel.setText("INTERVAL").setVisibility(true)
         workoutTime.setText(workout.remaining)
             .setVisibility(!workout.blink || blinkVisible)
         layoutWorkoutPower(workoutAvgIcon, workoutAvg, workoutAvgTag, workout.avg, "avg",
@@ -832,7 +822,6 @@ class HudScreen : Screen(420f, 150f) {
     /** Hide every workout-overlay element (outside a workout, or on the workout page itself). */
     private fun hideWorkout() {
         workoutBlinking = false
-        workoutLabel.setVisibility(false)
         workoutTime.setVisibility(false)
         workoutAvgIcon.setVisibility(false)
         workoutAvg.setVisibility(false)
@@ -1097,9 +1086,8 @@ class HudScreen : Screen(420f, 150f) {
         private const val CLIMB_PROF_TOP_Y = 100f
         private const val CLIMB_PROF_BASE_Y = 146f
 
-        // Mid-workout overlay geometry: caption, then the 33px countdown face, then the avg/NP pair
+        // Mid-workout overlay geometry: the 33px countdown face, then the avg/NP pair
         // split [WORKOUT_POWER_GAP] either side of the centre line — all inside the clear centre band.
-        private const val WORKOUT_LABEL_Y = 8f
         private const val WORKOUT_TIME_Y = 32f
         private const val WORKOUT_POWER_Y = 92f
         // The 14px glyph and the smaller tag face sit a touch below the value's top so all three
@@ -1109,7 +1097,6 @@ class HudScreen : Screen(420f, 150f) {
         private const val WORKOUT_POWER_GAP = 14f
         // Half-period of the countdown blink (its final 5 s): 500 ms off/on — urgent but readable.
         private const val WORKOUT_BLINK_HALF_MS = 500L
-
     }
 
     override fun onTouch(touch: TouchDirection) {

@@ -143,7 +143,7 @@ class ClimbProfileTest {
         assertEquals("8.6", o.avgGrade)         // 120 / 1400 = 8.57%
         assertEquals(HudColor.ORANGE, o.avgGradeColor)
         assertEquals("320 W", o.mpa)
-        assertEquals("CLIMB 2/3", o.climbLabel)
+        assertEquals("CLIMB 3/3", o.climbLabel)
     }
 
     @Test

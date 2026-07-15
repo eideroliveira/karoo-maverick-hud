@@ -4,6 +4,7 @@ import com.eider.karoomaverickhud.settings.HudConfig
 import io.hammerhead.karooext.models.DataPoint
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.StreamState
+import kotlin.math.sin
 import kotlin.random.Random
 
 /**
@@ -14,38 +15,107 @@ import kotlin.random.Random
 object HudPreviewBuilder {
 
     /**
-     * A preview snapshot for [cfg]. [seed] jitters the live-ish values so the glasses feel alive;
-     * [pageIndex] lets the caller cycle pages on the configured timer.
+     * A preview snapshot for [cfg] at cycle position [sceneIndex]. The mirror tours every layout the
+     * glasses raise on a ride — the rider's numbered pages, then the on-climb summary, the next-climb
+     * radar and the descent trajectory (the latter two when enabled) drawn as CENTRE OVERLAYS over the
+     * first page — mirroring `previewScenes()` in the on-screen lens so both previews agree. [seed]
+     * jitters the live-ish values so the glasses feel alive.
      */
-    fun snapshot(cfg: HudConfig, seed: Int, pageIndex: Int): HudSnapshot {
+    fun snapshot(cfg: HudConfig, seed: Int, sceneIndex: Int): HudSnapshot {
         val zones = ZoneConfig(cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
         val gear = GearLayout(cfg.gear.front, cfg.gear.rear, cfg.gear.display)
         val cap = cellsForRows(cfg.rows)
-        val pages = cfg.pages.map { page ->
-            val ids = page.take(cap)
+
+        fun renderPage(ids: List<String>): List<HudCell> {
+            val pageIds = ids.take(cap)
             // Mirror the runtime overlay: a page that carries a workout-target field gets a context
             // pre-stashed with the demo targets, so its live POWER/CADENCE tiles preview the same
-            // "current/target" composite (with range colouring) the rider sees mid-workout. Pages
-            // without a target field keep a null context and preview as plain zone-coloured values.
-            val ctx = workoutPreviewCtx(ids, cfg, zones, gear, seed)
-            ids.map { id ->
-                // The block·rep field is synthetic (computed in the live pipeline, not from a stream),
-                // so it has no demo StreamState — render its preview cell directly.
+            // "current/target" composite (with range colouring) the rider sees mid-workout.
+            val ctx = workoutPreviewCtx(pageIds, cfg, zones, gear, seed)
+            return pageIds.map { id ->
+                // The block·rep field is synthetic (no stream) — render its preview cell directly.
                 if (WorkoutBlocks.isSynthetic(id)) WorkoutBlocks.previewCell()
                 else FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear)
             }
-        }.filter { it.isNotEmpty() }
-        val idx = if (pages.isEmpty()) 0 else pageIndex % pages.size
-        return HudSnapshot(
-            pages = pages,
-            paused = false,
-            recording = true, // so the screen renders the cells rather than "waiting for ride"
-            pageIndex = idx,
-            rows = cfg.rows,
-            clock = "", // stamped by the bridge if the clock is enabled
-            showIcons = cfg.showIcons,
-            fontSize = cfg.hudFontSize,
+        }
+
+        val numbered = cfg.pages.map { renderPage(it) }.filter { it.isNotEmpty() }
+        // The page the centre overlays draw over (the rider's first page, as on a real ride).
+        val base = numbered.firstOrNull()
+            ?: renderPage(cfg.climbPage).ifEmpty { listOf(HudCell("--", "", HudColor.WHITE)) }
+
+        // Scene list, in the same order as the on-screen lens previewScenes(): numbered pages, then
+        // the on-climb summary, the next-climb radar and the descent trajectory (last two when on).
+        val scenes: List<HudSnapshot> = buildList {
+            numbered.forEach { add(baseSnapshot(cfg, it)) }
+            add(baseSnapshot(cfg, base).copy(climb = demoClimb(cfg)))
+            if (cfg.radarEnabled) add(baseSnapshot(cfg, base).copy(radar = demoRadar(cfg)))
+            if (cfg.trajectoryEnabled) add(baseSnapshot(cfg, base).copy(trajectory = demoTrajectory(cfg)))
+        }
+        return scenes[sceneIndex % scenes.size] // scenes always holds at least the climb scene
+    }
+
+    /** A single-page snapshot (no overlay) for [cells], with the shared ride-state defaults. */
+    private fun baseSnapshot(cfg: HudConfig, cells: List<HudCell>): HudSnapshot = HudSnapshot(
+        pages = listOf(cells),
+        paused = false,
+        recording = true, // so the screen renders the cells rather than "waiting for ride"
+        pageIndex = 0,
+        rows = cfg.rows,
+        clock = "", // stamped by the bridge if the clock is enabled
+        showIcons = cfg.showIcons,
+        fontSize = cfg.hudFontSize,
+    )
+
+    /** Demo next-climb radar overlay (~0.8 km to an 8% ramp) for both previews. */
+    fun demoRadar(cfg: HudConfig): RadarOverlay? = FieldFormat.radarOverlay(
+        NextClimb(distanceToStart = 800.0, etaSeconds = 72.0, grade = 8.0, length = 1200.0, totalElevation = 96.0),
+        cfg.imperial,
+    )
+
+    /** Demo on-climb overlay (mid-climb, ~150 m of ascent left, grade-coloured profile) for both previews. */
+    fun demoClimb(cfg: HudConfig): ClimbOverlay? {
+        val climbState = StreamState.Streaming(
+            DataPoint(
+                dataTypeId = DataType.Type.CLIMB,
+                values = mapOf(
+                    DataType.Field.DISTANCE_TO_TOP to 1_800.0, // horizontal m to the end
+                    DataType.Field.ELEVATION_TO_TOP to 150.0,  // vertical m of ascent left
+                    DataType.Field.CLIMB_NUMBER to 2.0,
+                    DataType.Field.TOTAL_CLIMBS to 3.0,
+                ),
+            ),
         )
+        val gradeState = StreamState.Streaming(
+            DataPoint(dataTypeId = DataType.Type.ELEVATION_GRADE, values = mapOf(DataType.Field.ELEVATION_GRADE to 8.5)),
+        )
+        return FieldFormat.climbOverlay(climbState, gradeState, mpaWatts = cfg.ftp * 1.6, profile = demoClimbProfile(), imperial = cfg.imperial)
+    }
+
+    /** A rising, grade-coloured silhouette for the demo climb profile. */
+    private fun demoClimbProfile(): ClimbProfileData {
+        val buckets = ClimbProfile.BUCKETS
+        val bars = (0 until buckets).map { b ->
+            val f0 = b.toFloat() / buckets
+            val f1 = (b + 1f) / buckets
+            val height = (0.12f + 0.85f * f1).coerceIn(0.06f, 1f)   // rises toward the summit
+            val grade = 3.0 + 7.0 * sin(f0 * Math.PI)               // eases low, bites mid → varied colours
+            ProfileBar(startFrac = f0, endFrac = f1, heightFrac = height, color = ClimbProfile.gradeColor(grade))
+        }
+        return ClimbProfileData(bars, progressFrac = 0.4f)
+    }
+
+    /** Demo heading-up trajectory (a curving road ahead) for the descent preview. */
+    fun demoTrajectory(cfg: HudConfig): Trajectory {
+        val pts = (0..20).map { i ->
+            val f = i / 20f
+            val forward = f * 190f
+            val right = (sin(f * 3.4) * 26.0 * (0.3 + 0.7 * f)).toFloat()
+            MetersPoint(right, forward)
+        }
+        val speed = if (cfg.imperial) HudCell("20", "mph", HudColor.WHITE) else HudCell("32", "km/h", HudColor.WHITE)
+        val grade = HudCell("-6", "%", HudColor.WHITE)
+        return Trajectory(points = pts, overlay = listOf(speed, grade))
     }
 
     /**

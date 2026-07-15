@@ -336,7 +336,7 @@ private fun AppBar(screen: String, onBack: () -> Unit) {
                 KText(title, color = K.text, size = 26.sp, weight = FontWeight.Bold, family = CondFamily, maxLines = 1)
                 KText(sub.uppercase(), color = K.text3, size = 14.sp, letterSpacing = 0.7.sp, maxLines = 1)
             }
-            if (isHub) KPill("v0.1", color = K.text2, bg = K.surface2)
+            if (isHub) KPill("v${com.eider.karoomaverickhud.BuildConfig.VERSION_NAME}", color = K.text2, bg = K.surface2)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(K.line))
     }

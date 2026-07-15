@@ -34,7 +34,7 @@ class WorkoutFieldFormatTest {
             DataType.Field.WORKOUT_CURRENT_STEP to 3.0,
             DataType.Field.WORKOUT_STEP_COUNT to 12.0,
         )
-        assertEquals("3/12", cell(DataType.Type.WORKOUT_INTERVAL_COUNT, s).value)
+        assertEquals("4/12", cell(DataType.Type.WORKOUT_INTERVAL_COUNT, s).value)
     }
 
     @Test
