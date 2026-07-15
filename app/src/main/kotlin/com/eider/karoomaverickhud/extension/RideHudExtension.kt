@@ -337,11 +337,11 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .distinctUntilChanged()
             .stateIn(scope, SharingStarted.Eagerly, null)
 
-        // Gear-change flash: whenever the resolved gear changes, show the new chainring/cassette
-        // ratio in the centre for [GearShift.VISIBLE_MS], colour-coded by how the ratio moved (see
-        // [GearShift]). The SHIFTING_GEARS stream is Idle without a shifting sensor, so this costs
-        // nothing then; dropped in critical battery mode alongside the other centre overlays. Re-
-        // subscribed when the gear config changes so teeth resolution uses the fresh drivetrain.
+        // Gear-change tag: whenever the resolved gear changes, append the new ratio to the live GEAR
+        // field for [GearShift.VISIBLE_MS], colour-coded by how the ratio moved (see [GearShift]);
+        // then it clears and the field returns to its plain teeth. The SHIFTING_GEARS stream is Idle
+        // without a shifting sensor, so this costs nothing then; dropped in critical battery mode.
+        // Re-subscribed when the gear config changes so teeth resolution uses the fresh drivetrain.
         val gearShiftFlow = combine(
             configFlow.map { it.gear }.distinctUntilChanged(), Eco.critical,
         ) { gear, critical -> gear to critical }
@@ -355,16 +355,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         .filterNotNull()
                         .distinctUntilChanged()
                         // Carry the previous gear so each change can be compared; the initial fold
-                        // value and the first real reading both yield null (no flash at ride start).
-                        .scan<Pair<Int, Int>, Pair<Pair<Int, Int>?, GearShiftOverlay?>>(null to null) { (prev, _), next ->
-                            next to prev?.let { GearShift.overlay(it, next) }
+                        // value and the first real reading both yield null (no tag at ride start).
+                        .scan<Pair<Int, Int>, Pair<Pair<Int, Int>?, GearShiftSuffix?>>(null to null) { (prev, _), next ->
+                            next to prev?.let { GearShift.suffix(it, next) }
                         }
                         .mapNotNull { it.second }
-                        // Show the flash, then clear it after the window. flatMapLatest restarts the
+                        // Show the tag, then clear it after the window. flatMapLatest restarts the
                         // timer on a fresh shift, so rapid shifting keeps the latest ratio up.
-                        .flatMapLatest { overlay ->
-                            flow<GearShiftOverlay?> {
-                                emit(overlay)
+                        .flatMapLatest { suffix ->
+                            flow<GearShiftSuffix?> {
+                                emit(suffix)
                                 delay(GearShift.VISIBLE_MS)
                                 emit(null)
                             }
@@ -501,7 +501,21 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     climb = onClimb,
                 )
             }.combine(workoutOverlayFlow) { frame, workout -> frame.copy(workout = workout) }
-                .combine(gearShiftFlow) { frame, gearShift -> frame.copy(gearShift = gearShift) }
+                .combine(gearShiftFlow) { frame, gearShift ->
+                    // In the brief window after a shift, tag the GEAR cell with the coloured new
+                    // ratio. If the GEAR field isn't on any page (no cell to tag), nothing happens.
+                    val gearCell = gearShift?.let { frame.cells[DataType.Type.SHIFTING_GEARS] }
+                    if (gearCell == null) {
+                        frame
+                    } else {
+                        frame.copy(
+                            cells = frame.cells + (
+                                DataType.Type.SHIFTING_GEARS to
+                                    gearCell.copy(suffix = gearShift.ratio, suffixColor = gearShift.color)
+                                ),
+                        )
+                    }
+                }
         }
 
         // HUD refresh interval: the configured rate, slowed as the glasses battery drains so the
@@ -540,7 +554,6 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     climb = frame.climb,
                     workout = frame.workout,
                     workoutPageIndex = frame.layout.workoutPageIndex,
-                    gearShift = frame.gearShift,
                 )
             }
             .onEach { snapshot -> maverick.update(snapshot) }
@@ -570,7 +583,6 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val radar: RadarOverlay?,
         val climb: ClimbOverlay?,
         val workout: WorkoutOverlay? = null,
-        val gearShift: GearShiftOverlay? = null,
     )
 
     /**
