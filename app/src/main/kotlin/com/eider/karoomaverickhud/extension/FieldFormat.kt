@@ -273,6 +273,14 @@ data class HudCell(
      * alone, and for fields with no icon. See [FieldFormat.iconTagFor].
      */
     val iconLabel: String = "",
+    /**
+     * An extra tag drawn on the value line, right after [value], in its own [suffixColor] — used by
+     * the GEAR field to show the new gear ratio for a few seconds after a shift (see [GearShift]).
+     * Empty for every other cell and once the post-shift window lapses. See HudScreen.layoutCell.
+     */
+    val suffix: String = "",
+    /** Colour of [suffix]; null (defaults to white) when there's no suffix. */
+    val suffixColor: HudColor? = null,
 ) {
     companion object {
         fun blank(dataTypeId: String) =
@@ -347,13 +355,6 @@ data class HudSnapshot(
      * can suppress the [workout] overlay there; null when no workout page is present.
      */
     val workoutPageIndex: Int? = null,
-    /**
-     * The new gear ratio to flash in the centre for ~3 s right after a shift, colour-coded by how
-     * the ratio moved (green ≈ same, yellow harder, cyan easier — see [GearShift]). Null except in
-     * the brief window after a shift. Drawn just below the descent [trajectory] in precedence (a
-     * curve still beats a shift flash) and above the other centre overlays while it's up.
-     */
-    val gearShift: GearShiftOverlay? = null,
 ) {
     companion object {
         val empty = HudSnapshot(emptyList(), paused = false, recording = false, pageIndex = 0, rows = MAX_ROWS)

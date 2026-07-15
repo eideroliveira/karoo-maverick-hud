@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/** Verifies the gear-change flash: teeth resolution, ±5 % ratio colouring, and the overlay build. */
+/** Verifies the gear-change ratio tag: teeth resolution, the ±10 % ratio colouring, and the build. */
 class GearShiftTest {
 
     private val gear = GearLayout(
@@ -37,40 +37,49 @@ class GearShiftTest {
     }
 
     @Test
-    fun smallChangeIsGreen() {
-        // 52/14 = 3.714 vs 48/13 = 3.692 → a 0.6 % move → the same gear → green.
-        assertEquals(HudColor.GREEN, GearShift.color(3.714, 3.692))
+    fun bigDropIsCyan() {
+        // Ratio dropped more than 10 % → much easier gear.
+        assertEquals(HudColor.CYAN, GearShift.color(3.0, 2.6)) // -13 %
     }
 
     @Test
-    fun harderGearIsYellow() {
-        // ratio grew more than 5 % → harder gear.
-        assertEquals(HudColor.YELLOW, GearShift.color(3.0, 3.30)) // +10 %
+    fun slightDropIsGreen() {
+        // Ratio dropped up to 10 % → slightly easier gear.
+        assertEquals(HudColor.GREEN, GearShift.color(3.0, 2.85)) // -5 %
     }
 
     @Test
-    fun easierGearIsCyan() {
-        // ratio dropped more than 5 % → easier gear.
-        assertEquals(HudColor.CYAN, GearShift.color(3.0, 2.70)) // -10 %
+    fun slightRiseIsYellow() {
+        // Ratio rose up to 10 % → slightly harder gear.
+        assertEquals(HudColor.YELLOW, GearShift.color(3.0, 3.15)) // +5 %
     }
 
     @Test
-    fun boundaryStaysGreen() {
-        // Exactly ±5 % is still "the same gear".
-        assertEquals(HudColor.GREEN, GearShift.color(100.0, 105.0))
-        assertEquals(HudColor.GREEN, GearShift.color(100.0, 95.0))
+    fun bigRiseIsOrange() {
+        // Ratio rose more than 10 % → much harder gear.
+        assertEquals(HudColor.ORANGE, GearShift.color(3.0, 3.45)) // +15 %
     }
 
     @Test
-    fun overlayFormatsRatioAndColour() {
-        // 48/14 = 3.43 → 48/13 = 3.69 is a +7.7 % jump (a harder cog) → yellow, shown as "48/13".
-        val overlay = GearShift.overlay(48 to 14, 48 to 13)
-        assertEquals("48/13", overlay?.ratio)
-        assertEquals(HudColor.YELLOW, overlay?.color)
+    fun boundariesFoldToTheMildBands() {
+        // Exactly ±10 % is still a "slight" move (green easier / yellow harder).
+        assertEquals(HudColor.GREEN, GearShift.color(100.0, 90.0)) // -10 %
+        assertEquals(HudColor.YELLOW, GearShift.color(100.0, 110.0)) // +10 %
+        // Just past ±10 % flips to the extreme bands.
+        assertEquals(HudColor.CYAN, GearShift.color(100.0, 89.0)) // -11 %
+        assertEquals(HudColor.ORANGE, GearShift.color(100.0, 111.0)) // +11 %
     }
 
     @Test
-    fun overlayNullOnZeroRear() {
-        assertNull(GearShift.overlay(48 to 0, 48 to 14))
+    fun suffixFormatsRatioAndColour() {
+        // 48/14 = 3.43 → 48/13 = 3.69 is a +7.7 % jump (a harder cog) → yellow, shown as "3.69".
+        val suffix = GearShift.suffix(48 to 14, 48 to 13)
+        assertEquals("3.69", suffix?.ratio)
+        assertEquals(HudColor.YELLOW, suffix?.color)
+    }
+
+    @Test
+    fun suffixNullOnZeroRear() {
+        assertNull(GearShift.suffix(48 to 0, 48 to 14))
     }
 }

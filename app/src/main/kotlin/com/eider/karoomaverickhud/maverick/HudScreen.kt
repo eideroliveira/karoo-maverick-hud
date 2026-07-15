@@ -24,7 +24,6 @@ import com.eider.karoomaverickhud.extension.HudCell
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.HudIcon
-import com.eider.karoomaverickhud.extension.GearShiftOverlay
 import com.eider.karoomaverickhud.extension.HudSnapshot
 import com.eider.karoomaverickhud.extension.MAX_CELLS
 import com.eider.karoomaverickhud.extension.RadarOverlay
@@ -129,6 +128,10 @@ class HudScreen : Screen(420f, 150f) {
     private val values = Array(cellCount) { Text() }
     private val units = Array(cellCount) { Text() }
     private val icons = Array(cellCount) { Image() }
+    // A short coloured tag drawn on the value line, just after the value — currently only the GEAR
+    // field uses it, to show the new ratio for a few seconds after a shift ([HudCell.suffix]). Runs
+    // the same value face as the digits it trails; hidden on every other cell.
+    private val suffixes = Array(cellCount) { Text() }
 
     // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
     // assets/fonts. Each occupies its own glasses font slot; the HxW token in each filename is parsed
@@ -213,12 +216,6 @@ class HudScreen : Screen(420f, 150f) {
     private val workoutAvg = Text()
     private val workoutNp = Text()
 
-    // Gear-change flash (a centre overlay shown for ~3 s after a shift): a dim "GEAR" caption over
-    // the new chainring/cassette ratio in the large value face, tinted by how the ratio moved
-    // (green ≈ same, yellow harder, cyan easier — see [GearShift]).
-    private val gearShiftLabel = Text()
-    private val gearShiftRatio = Text()
-
     // Whether the workout countdown is currently drawn in blink mode, plus the last blink phase
     // applied — lets onUpdateUI flip just the countdown's visibility between full renders (the
     // pushed snapshot only changes ~1/s; the blink runs at [WORKOUT_BLINK_HALF_MS]).
@@ -299,6 +296,13 @@ class HudScreen : Screen(420f, 150f) {
                 .setTextAlign(Align.left)
                 .setForegroundColor(EvsColor.White.rgba)
                 .addTo(this)
+            suffixes[i]
+                .setText("")
+                .setResource(valueFontFor(layoutFontSize))
+                .setTextAlign(Align.left)
+                .setForegroundColor(EvsColor.White.rgba)
+                .setVisibility(false)
+                .addTo(this)
         }
 
         pauseDot
@@ -363,28 +367,6 @@ class HudScreen : Screen(420f, 150f) {
         setupRadar()
         setupClimb()
         setupWorkout()
-        setupGearShift()
-    }
-
-    /** Create the gear-change flash's dim "GEAR" caption and the large ratio readout (both hidden). */
-    private fun setupGearShift() {
-        gearShiftLabel
-            .setText("")
-            .setResource(Font.StockFont.Small)
-            .setTextAlign(Align.center)
-            .setXY(screenW / 2f, GEAR_SHIFT_LABEL_Y)
-            .setForegroundColor(LABEL_RGBA)
-            .setVisibility(false)
-            .addTo(this)
-        // The ratio is the sole focus of the 3 s flash, so it runs the large (42px) value face.
-        gearShiftRatio
-            .setText("")
-            .setResource(valueFontLarge)
-            .setTextAlign(Align.center)
-            .setXY(screenW / 2f, GEAR_SHIFT_RATIO_Y)
-            .setForegroundColor(EvsColor.White.rgba)
-            .setVisibility(false)
-            .addTo(this)
     }
 
     /** Create the mid-workout overlay's caption, countdown and avg/NP power pair (all hidden). */
@@ -565,6 +547,7 @@ class HudScreen : Screen(420f, 150f) {
         for (i in 0 until cellCount) {
             values[i].setResource(vf)
             units[i].setResource(uf)
+            suffixes[i].setResource(vf) // the gear-shift tag trails the value in the same face
         }
     }
 
@@ -632,19 +615,18 @@ class HudScreen : Screen(420f, 150f) {
         }
 
         // Centre overlays, drawn over the clear centre of whatever page is shown. Precedence: the
-        // descent trajectory first (reading a curve beats everything), then the brief gear-change
-        // flash (a deliberate rider action that wants immediate confirmation), then the mid-workout
-        // readout, then the on-climb summary/profile, then the next-climb radar preview (you're
-        // either approaching a climb or on it, so the latter two rarely coincide). The workout
-        // readout is suppressed on the workout page itself — that page already carries the detail.
+        // descent trajectory first (reading a curve beats everything), then the mid-workout readout,
+        // then the on-climb summary/profile, then the next-climb radar preview (you're either
+        // approaching a climb or on it, so the latter two rarely coincide). The workout readout is
+        // suppressed on the workout page itself — that page already carries the detail. (The
+        // gear-change ratio isn't a centre overlay: it rides on the GEAR cell itself, see layoutCell.)
         val workout = snap.workout?.takeIf { snap.workoutPageIndex == null || snap.pageIndex != snap.workoutPageIndex }
         when {
-            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideGearShift(); hideRadar(); hideClimb(); hideWorkout() }
-            snap.gearShift != null -> { renderGearShift(snap.gearShift!!); hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
-            workout != null -> { renderWorkout(workout, blinkVisible); hideTrajectory(); hideGearShift(); hideRadar(); hideClimb() }
-            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideGearShift(); hideRadar(); hideWorkout() }
-            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideGearShift(); hideClimb(); hideWorkout() }
-            else -> { hideTrajectory(); hideGearShift(); hideRadar(); hideClimb(); hideWorkout() }
+            snap.trajectory != null -> { renderTrajectory(snap.trajectory!!); hideRadar(); hideClimb(); hideWorkout() }
+            workout != null -> { renderWorkout(workout, blinkVisible); hideTrajectory(); hideRadar(); hideClimb() }
+            snap.climb != null -> { renderClimb(snap.climb!!); hideTrajectory(); hideRadar(); hideWorkout() }
+            snap.radar != null -> { renderRadar(snap.radar!!); hideTrajectory(); hideClimb(); hideWorkout() }
+            else -> { hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
         }
 
         pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
@@ -792,20 +774,6 @@ class HudScreen : Screen(420f, 150f) {
         workoutNp.setVisibility(false)
     }
 
-    /** Draw the gear-change flash centred over the current page: the "GEAR" caption + tinted ratio. */
-    private fun renderGearShift(gearShift: GearShiftOverlay) {
-        gearShiftLabel.setText("GEAR").setVisibility(true)
-        gearShiftRatio.setText(gearShift.ratio)
-            .setForegroundColor(colorRgba(gearShift.color))
-            .setVisibility(true)
-    }
-
-    /** Hide the gear-change flash (outside the brief post-shift window). */
-    private fun hideGearShift() {
-        gearShiftLabel.setVisibility(false)
-        gearShiftRatio.setVisibility(false)
-    }
-
     /** Hide every on-climb-overlay element (when not on a climb). */
     private fun hideClimb() {
         climbLabel.setVisibility(false)
@@ -853,7 +821,31 @@ class HudScreen : Screen(420f, 150f) {
         val anchorX = if (slot.isRight) rightX else leftX
 
         values[i].setText(cell?.value ?: "").setForegroundColor(color)
-        values[i].setTextAlign(align).setXY(anchorX, slot.valueY)
+        values[i].setTextAlign(align)
+
+        // The gear-shift ratio tag ([HudCell.suffix]): drawn on the value line just after the value,
+        // in its own colour. Measure it first (0 when none) so the value can make room. On the right
+        // column the value+tag right-align as a pair — the tag hugs rightX, the value shifts inboard
+        // by the tag's width — so the pair still hugs the edge and reads "teeth ratio" left-to-right.
+        val suffixText = cell?.suffix.orEmpty()
+        val hasSuffix = suffixText.isNotEmpty()
+        val suffixW = if (hasSuffix) {
+            suffixes[i].setText(suffixText).setForegroundColor(colorRgba(cell?.suffixColor ?: HudColor.WHITE))
+            suffixes[i].setTextAlign(align)
+            suffixes[i].getMeasuredContentWidth()
+        } else {
+            0f
+        }
+        // The value's actual anchor (shifted inboard on the right column to leave room for the tag);
+        // reused for the unit-tag placement below so the unit stays tucked against the value.
+        val valueAnchorX = if (hasSuffix && slot.isRight) rightX - suffixW - sideGap else anchorX
+        values[i].setXY(valueAnchorX, slot.valueY)
+        if (hasSuffix) {
+            val suffixX = if (slot.isRight) rightX else leftX + values[i].getMeasuredContentWidth() + sideGap
+            suffixes[i].setXY(suffixX, slot.valueY).setVisibility(true)
+        } else {
+            suffixes[i].setText("").setVisibility(false)
+        }
 
         // The label/tag text. With icons on it's the short differentiator that tells fields sharing
         // an icon apart — empty for the original that owns the icon, so it shows the icon alone;
@@ -871,9 +863,9 @@ class HudScreen : Screen(420f, 150f) {
         // each element's cachedMeasuredWidth, so getMeasuredContentWidth is current this frame.
         val tagX: Float = if (slot.side) {
             val valueW = values[i].getMeasuredContentWidth()
-            if (slot.isRight) rightX - valueW - sideGap else leftX + valueW + sideGap
+            if (slot.isRight) valueAnchorX - valueW - sideGap else leftX + valueW + sideGap
         } else {
-            anchorX
+            valueAnchorX
         }
 
         // Lay the icon and its tag side by side, growing inboard (rightward on the left column,
@@ -978,6 +970,7 @@ class HudScreen : Screen(420f, 150f) {
     private fun blankCell(i: Int) {
         values[i].setText("")
         units[i].setText("")
+        suffixes[i].setText("").setVisibility(false)
         icons[i].setVisibility(false)
         currentIcon[i] = null
     }
@@ -1045,10 +1038,6 @@ class HudScreen : Screen(420f, 150f) {
         // Half-period of the countdown blink (its final 5 s): 500 ms off/on — urgent but readable.
         private const val WORKOUT_BLINK_HALF_MS = 500L
 
-        // Gear-change flash geometry: a small caption over the 42px ratio, roughly centred in the
-        // clear centre band (below the caption baseline, the large face reads down to ~110px).
-        private const val GEAR_SHIFT_LABEL_Y = 40f
-        private const val GEAR_SHIFT_RATIO_Y = 64f
     }
 
     override fun onTouch(touch: TouchDirection) {
