@@ -80,10 +80,8 @@ class GlassesDataType(extension: String) : DataTypeImpl(extension, TYPE_ID) {
             views.setTextColor(R.id.gf_main, COLOR_WHITE)
             return
         }
-        // Top line: an ECO badge while battery-saver is engaged (amber, "(auto)" when the low-battery
-        // threshold tripped it), otherwise the current brightness. Signal bars (link quality) follow.
+        // Top line: current brightness (amber while battery-saver is engaged), then signal bars.
         val lead = when {
-            s.eco -> if (s.ecoAuto) "ECO (auto)" else "ECO"
             s.auto -> "Auto"
             s.brightness != null -> "${s.brightness}%"
             else -> "—"

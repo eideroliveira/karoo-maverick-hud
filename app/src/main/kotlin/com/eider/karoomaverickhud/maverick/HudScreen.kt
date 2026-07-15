@@ -617,7 +617,8 @@ class HudScreen : Screen(420f, 150f) {
 
         // ECO badge (top-left) whenever battery-saver is engaged — shown over both the waiting
         // screen and the live HUD below.
-        ecoText.setText(if (snap.eco) "ECO" else "").setVisibility(snap.eco)
+        // [User request: don't render the string ECO]
+        ecoText.setVisibility(false)
 
         // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
         if (!snap.recording && !snap.paused) {
@@ -858,6 +859,7 @@ class HudScreen : Screen(420f, 150f) {
             pauseDot.setXY(getWidth() / 2f, 4f)
         } else {
             batteryWarnText
+                .setResource(if (snap.eco) unitFontBig else valueFontSmall)
                 .setText("${snap.battery}%")
                 .setForegroundColor(colorRgba(warn.color))
                 .setVisibility(true)
