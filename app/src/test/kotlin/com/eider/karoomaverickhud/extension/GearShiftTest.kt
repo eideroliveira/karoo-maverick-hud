@@ -82,4 +82,62 @@ class GearShiftTest {
     fun suffixNullOnZeroRear() {
         assertNull(GearShift.suffix(48 to 0, 48 to 14))
     }
+
+    @Test
+    fun firstReadingShowsNoTag() {
+        val t = GearShiftTracker().advance(48 to 14, 1_000L)
+        assertNull(t.suffix)
+        assertEquals(48 to 14, t.gear)
+    }
+
+    @Test
+    fun singleShiftComparesAgainstTheGearJustLeft() {
+        val t = GearShiftTracker().advance(48 to 14, 0L).advance(48 to 13, 1_000L)
+        assertEquals("3.69", t.suffix?.ratio) // 48/13
+        assertEquals(HudColor.YELLOW, t.suffix?.color) // +7.7 % vs 48/14
+    }
+
+    @Test
+    fun quickMultiShiftKeepsThePreBurstGearAsReference() {
+        // Three cogs dumped in ~600 ms: 14 → 13 → 12 → 11. Each step is a small rise on its own, but
+        // the burst as a whole is 48/14 → 48/11 (+27 %) → orange, showing the resulting 4.36.
+        val t = GearShiftTracker()
+            .advance(48 to 14, 0L)
+            .advance(48 to 13, 1_000L)
+            .advance(48 to 12, 1_200L)
+            .advance(48 to 11, 1_600L)
+        assertEquals(48 to 14, t.anchor)
+        assertEquals("4.36", t.suffix?.ratio)
+        assertEquals(HudColor.ORANGE, t.suffix?.color)
+    }
+
+    @Test
+    fun shiftAfterTheWindowStartsAFreshComparison() {
+        // The second shift lands once the tag has cleared, so it's judged on its own step only.
+        val t = GearShiftTracker()
+            .advance(48 to 14, 0L)
+            .advance(48 to 13, 1_000L)
+            .advance(48 to 12, 1_000L + GearShift.VISIBLE_MS)
+        assertEquals(48 to 13, t.anchor)
+        assertEquals("4.00", t.suffix?.ratio)
+        assertEquals(HudColor.YELLOW, t.suffix?.color) // 48/13 → 48/12 is +8.3 %
+    }
+
+    @Test
+    fun burstThatReturnsToItsStartIsNeutral() {
+        // Shifted down then straight back up: the net move is nothing, so no easier/harder colour.
+        val t = GearShiftTracker()
+            .advance(48 to 14, 0L)
+            .advance(48 to 17, 1_000L)
+            .advance(48 to 14, 1_500L)
+        assertEquals("3.43", t.suffix?.ratio)
+        assertEquals(HudColor.WHITE, t.suffix?.color)
+    }
+
+    @Test
+    fun repeatedSameGearIsNotAShift() {
+        val shifted = GearShiftTracker().advance(48 to 14, 0L).advance(48 to 13, 1_000L)
+        val again = shifted.advance(48 to 13, 1_200L)
+        assertEquals(shifted, again) // unchanged: window not restarted, anchor kept
+    }
 }

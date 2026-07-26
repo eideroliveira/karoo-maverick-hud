@@ -339,8 +339,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .stateIn(scope, SharingStarted.Eagerly, null)
 
         // Gear-change tag: whenever the resolved gear changes, append the new ratio to the live GEAR
-        // field for [GearShift.VISIBLE_MS], colour-coded by how the ratio moved (see [GearShift]);
-        // then it clears and the field returns to its plain teeth. The SHIFTING_GEARS stream is Idle
+        // field for [GearShift.VISIBLE_MS] after the last change, colour-coded by how the ratio moved
+        // across the whole burst of shifts (see [GearShift] / [GearShiftTracker]); then it clears and
+        // the field returns to its plain teeth. The SHIFTING_GEARS stream is Idle
         // without a shifting sensor, so this costs nothing then; dropped in critical battery mode.
         // Re-subscribed when the gear config changes so teeth resolution uses the fresh drivetrain.
         val gearShiftFlow = combine(
@@ -355,14 +356,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         .map { GearShift.teeth((it as? StreamState.Streaming)?.dataPoint, layout) }
                         .filterNotNull()
                         .distinctUntilChanged()
-                        // Carry the previous gear so each change can be compared; the initial fold
-                        // value and the first real reading both yield null (no tag at ride start).
-                        .scan<Pair<Int, Int>, Pair<Pair<Int, Int>?, GearShiftSuffix?>>(null to null) { (prev, _), next ->
-                            next to prev?.let { GearShift.suffix(it, next) }
+                        // Compare each change against the gear held before the current burst of
+                        // shifts, so a fast multi-shift reports the whole move (see
+                        // [GearShiftTracker]); the first reading of the ride yields no tag.
+                        .scan(GearShiftTracker()) { tracker, next ->
+                            tracker.advance(next, System.currentTimeMillis())
                         }
-                        .mapNotNull { it.second }
-                        // Show the tag, then clear it after the window. flatMapLatest restarts the
-                        // timer on a fresh shift, so rapid shifting keeps the latest ratio up.
+                        .mapNotNull { it.suffix }
+                        // Show the tag, then clear it after the window. flatMapLatest cancels the
+                        // pending clear on each fresh shift, so a burst keeps the running ratio up
+                        // and only clears VISIBLE_MS after the last change in it.
                         .flatMapLatest { suffix ->
                             flow<GearShiftSuffix?> {
                                 emit(suffix)
