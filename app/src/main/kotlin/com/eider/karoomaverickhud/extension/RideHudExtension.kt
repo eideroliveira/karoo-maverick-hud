@@ -20,6 +20,7 @@ import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.Device
 import io.hammerhead.karooext.models.DeviceEvent
 import io.hammerhead.karooext.models.InRideAlert
+import io.hammerhead.karooext.models.MarkLap
 import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.RideState
@@ -86,8 +87,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
         // The bridge keeps the link always-connected (not ride-gated); it uses the ride-state feed
-        // only to re-arm its fast connect-retry window when a ride starts.
-        maverick.start(rideStateFlow)
+        // only to re-arm its fast connect-retry window when a ride starts. It also needs a way to
+        // take a lap (temple-pad double-tap) — that's ours to dispatch, it holds no Karoo service.
+        maverick.start(rideStateFlow) { markLap() }
 
         ContextCompat.registerReceiver(
             this,
@@ -114,6 +116,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             "pair" -> openSettings(autoPair = true)
             "configure" -> openSettings(autoPair = false)
         }
+    }
+
+    /**
+     * Take a lap on the Karoo, as if the rider had pressed its lap button. Driven by a temple-pad
+     * double-tap on the glasses (see [MaverickBridge.start]) so laps can be marked without reaching
+     * for the head unit; the bridge has already checked that a ride is recording.
+     */
+    private fun markLap() {
+        val ok = karoo.dispatch(MarkLap)
+        Timber.i("MarkLap dispatched=$ok")
     }
 
     private fun openSettings(autoPair: Boolean) {

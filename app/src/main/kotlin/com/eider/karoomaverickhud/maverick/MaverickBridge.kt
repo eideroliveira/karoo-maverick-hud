@@ -151,14 +151,27 @@ class MaverickBridge(
 
     private var connectionJob: Job? = null
 
+    // A tap waiting to see whether a second one turns it into a double-tap. Only its `isActive` is
+    // read, so a finished job left in the field is harmless — no need to clear it from the coroutine
+    // (which would race the touch thread that writes it).
+    @Volatile private var pendingTapJob: Job? = null
+
+    // Marks a lap on the Karoo (dispatches MarkLap); supplied by the extension, which owns the
+    // KarooSystemService. Null until [start].
+    private var markLap: (() -> Unit)? = null
+
     /**
      * Start the extension's glasses work: connect to the paired Maverick and then stay connected,
      * reconnecting on drops. Connect attempts are bounded by [retryUntil] so an absent device isn't
      * hammered forever; the window re-arms on a ride start (see [startRetryArmer]). Released in
      * [shutdown].
+     *
+     * [markLap] takes a lap on the Karoo — invoked by a double-tap on the temple pad (see
+     * [handleTouch]); the bridge can't reach the Karoo system service itself.
      */
-    fun start(rideState: StateFlow<RideState>) {
+    fun start(rideState: StateFlow<RideState>, markLap: () -> Unit) {
         this.rideState = rideState
+        this.markLap = markLap
         armRetry() // try to connect for the first window from process start
         hudScreen.onTouchPad = ::handleTouch
         startConnectionLoop()
@@ -382,13 +395,14 @@ class MaverickBridge(
     /**
      * Temple-pad gestures.
      *  - Closed: long-tap opens the control window; forward/back flip pages (in any page mode —
-     *    AUTO keeps cycling from wherever they land). A bare tap cycles the zoom while the
-     *    trajectory map is showing, else toggles the workout overlay's avg/NP power while that
-     *    overlay is showing, and is otherwise swallowed so accidental pad touches don't bring up
-     *    the window mid-ride.
+     *    AUTO keeps cycling from wherever they land). A double-tap marks a lap on the Karoo. A bare
+     *    single tap cycles the zoom while the trajectory map is showing, else toggles the workout
+     *    overlay's avg/NP power while that overlay is showing, and is otherwise swallowed so
+     *    accidental pad touches don't bring up the window mid-ride.
      *  - Open: the window focuses one item at a time (Brightness → Auto → Radar → Trajectory → Race);
      *    forward cycles the focus, tap toggles the focused value (brightness steps +20% and wraps),
-     *    backward dismisses. Long-tap is reserved for opening, so it's a no-op while open.
+     *    backward dismisses. Long-tap is reserved for opening, so it's a no-op while open. Taps here
+     *    act at once (no double-tap wait) — the window is a menu, and a lap mid-menu isn't wanted.
      */
     private fun handleTouch(direction: TouchDirection) {
         Timber.d("touch=$direction controlOpen=$controlOpen focus=$ctrlFocus bright=$ctrlBrightness auto=$ctrlAuto")
@@ -405,12 +419,49 @@ class MaverickBridge(
             TouchDirection.longTap -> toggleControl()
             TouchDirection.forward -> changePage(+1)
             TouchDirection.backward -> changePage(-1)
-            TouchDirection.tap -> when {
+            TouchDirection.tap -> onTap()
+            else -> {}
+        }
+    }
+
+    /**
+     * Single-vs-double tap split. The glasses only report [TouchDirection.tap] (their SDK has no
+     * double-tap), so we time it ourselves: the first tap's action is held for [DOUBLE_TAP_MS], and a
+     * second tap inside that window cancels it and marks a lap instead. The cost is that the
+     * single-tap actions (trajectory zoom, workout power) land [DOUBLE_TAP_MS] late — both are
+     * cosmetic toggles, so the delay is a fair trade for not firing them on every lap gesture.
+     */
+    private fun onTap() {
+        val pending = pendingTapJob
+        if (pending?.isActive == true) {
+            pending.cancel()
+            pendingTapJob = null
+            onDoubleTap()
+            return
+        }
+        pendingTapJob = scope.launch {
+            delay(DOUBLE_TAP_MS)
+            when {
                 trajectoryShowing() -> cycleTrajectoryZoom()
                 workoutShowing() -> toggleWorkoutPower()
             }
-            else -> {}
         }
+    }
+
+    /**
+     * Double-tap on the temple pad: take a lap on the Karoo, exactly as the rider pressing its lap
+     * button would. Only while the ride is actually recording — a lap is meaningless when idle, and
+     * marking one on a paused ride isn't what a stray double touch should do. The Karoo gives its own
+     * lap feedback (beep / lap banner); the glasses HUD shows none of its own.
+     */
+    private fun onDoubleTap() {
+        val state = rideState?.value
+        if (state !is RideState.Recording) {
+            Timber.d("Double-tap ignored — ride not recording (state=$state)")
+            return
+        }
+        Timber.i("Double-tap → mark lap")
+        markLap?.invoke()
     }
 
     /** Whether the trajectory map is currently drawn (centre overlay), so a tap means "change zoom". */
@@ -762,6 +813,14 @@ class MaverickBridge(
 
         /** Focusable items in the in-ride control window: Brightness, Auto, Radar, Trajectory. */
         private const val CONTROL_ITEMS = 5
+
+        /**
+         * How long a tap waits for a second one before it counts as a single tap. The glasses report
+         * no double-tap of their own, so this is our own split (see [onTap]) — long enough for a
+         * deliberate double touch on a bumpy road, short enough that the single-tap toggles don't
+         * feel laggy.
+         */
+        private const val DOUBLE_TAP_MS = 350L
 
         /** How long to fast-retry a connect before backing off to the slow idle cadence. */
         private const val CONNECT_WINDOW_MS = 3 * 60_000L
