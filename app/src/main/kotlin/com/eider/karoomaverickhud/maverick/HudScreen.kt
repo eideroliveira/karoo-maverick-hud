@@ -289,8 +289,9 @@ class HudScreen : Screen(420f, 150f) {
     private fun UIElement.addTo(screen: Screen): UIElement = also { screen.add(it) }
 
     override fun onCreate() {
-        // Values and units use custom Roboto Condensed faces (see the field declarations): the
-        // value face is larger than the unit, and steps down on denser pages via [valueFontFor].
+        // Values and units use custom Roboto Condensed faces (see the field declarations): the unit
+        // is always the 18×12 face, while the value face follows the rider's [HudFontSize] via
+        // [valueFontFor] — Small shares that same 18×12 face, Medium/Large step up from it.
         // The remaining chrome (status line, control window) stays on the stock Small font.
         for (i in 0 until cellCount) {
             icons[i]
