@@ -136,21 +136,20 @@ class HudScreen : Screen(420f, 150f) {
     // Custom Roboto Condensed (SemiBold) HUD faces, generated with font2sif.py and bundled under
     // assets/fonts. Each occupies its own glasses font slot; the HxW token in each filename is parsed
     // by the SDK to set the glyph dimensions, so the generated names are verbatim. The value runs one
-    // of three faces chosen by the rider's [HudFontSize]. [MEDIUM] runs the 33×25 Roboto Condensed
-    // face (the default) and [LARGE] the 42×31 face. [SMALL] reuses the SDK stock Small font — the
-    // ~22px Assistant face the chrome and the trajectory/radar overlays already use — so it's
-    // genuinely smaller than the custom faces, at the cost of a different typeface (no custom slot
-    // needed). All independent of field count; the unit is always the 18×12 face, and the stacked
-    // (≤4) vs side-by-side (5–6) layout still follows the field count (see [slotsFor]).
-    // (The custom 31×22 / 38×28 / 13×9 faces are now unused.)
-    private val valueFontSmall = Font(Font.StockFont.Small)
+    // of three faces chosen by the rider's [HudFontSize] — 18×12 (Small, the same compact face the
+    // unit uses, so the value sits flush with its unit — see [unitFontBig]), 33×25 (Medium, the
+    // default) or 42×31 (Large) — independent of field count. The stacked (≤4) vs side-by-side (5–6)
+    // layout still follows the field count (see [slotsFor]).
+    // ([stockSmallFont] is the SDK stock Small face, retained only for the low-battery readout; the
+    // custom 31×22 / 38×28 / 13×9 faces are unused.)
+    private val stockSmallFont = Font(Font.StockFont.Small)
     private val valueFontMedium = Font("fonts/RobotoCondensed-SemiBold.ttf.33x25.2bpp.sifz", Font.Slot.s4)
     private val valueFontLarge = Font("fonts/RobotoCondensed-SemiBold.ttf.42x31.2bpp.sifz", Font.Slot.s2)
     private val unitFontBig = Font("fonts/RobotoCondensed-SemiBold.ttf.18x12.2bpp.sifz", Font.Slot.s3)
 
     /** Value face for the rider's chosen [HudFontSize] (independent of field count). */
     private fun valueFontFor(size: HudFontSize): Font = when (size) {
-        HudFontSize.SMALL -> valueFontSmall
+        HudFontSize.SMALL -> unitFontBig // 18×12 — the same compact face as the unit
         HudFontSize.MEDIUM -> valueFontMedium
         HudFontSize.LARGE -> valueFontLarge
     }
@@ -877,7 +876,7 @@ class HudScreen : Screen(420f, 150f) {
             pauseDot.setXY(getWidth() / 2f, 4f)
         } else {
             batteryWarnText
-                .setResource(if (snap.eco) unitFontBig else valueFontSmall)
+                .setResource(if (snap.eco) unitFontBig else stockSmallFont)
                 .setText("${snap.battery}%")
                 .setForegroundColor(colorRgba(warn.color))
                 .setVisibility(true)
