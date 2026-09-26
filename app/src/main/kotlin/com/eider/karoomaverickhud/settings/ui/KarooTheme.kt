@@ -122,6 +122,8 @@ val ICON_PATHS: Map<String, String> = mapOf(
     "percent" to "M6 18 18 6 M7.5 7.5 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0 M16.5 16.5 m-2.5 0 a2.5 2.5 0 1 0 5 0 a2.5 2.5 0 1 0 -5 0",
     // distance-to-top — an up-arrow striking a top line ("to the top")
     "totop" to "M4 4h16 M12 20V7 M7 12 12 7 17 12",
+    // torque — a hammer: head square across the handle, handle running down-left (mirrors ic_torque.png)
+    "torque" to "M12.4 4.6 19.5 11.6 16.6 14.5 9.5 7.4Z M13.1 10.9 4 20",
     "ascent" to "m3 18 5-8 4 5 3-4 6 7Z",
     "temp" to "M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0Z",
     "np" to "M4 18V6l8 8 8-8v12",

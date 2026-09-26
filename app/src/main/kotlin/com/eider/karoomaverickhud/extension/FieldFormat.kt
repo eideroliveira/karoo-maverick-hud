@@ -193,7 +193,7 @@ data class FieldSpec(
 )
 
 /** Small glyph drawn beside a value when the rider enables HUD icons; mapped to an asset by the screen. */
-enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE, GEAR }
+enum class HudIcon { POWER, SPEED, HEART, CADENCE, TIME, DISTANCE, BALANCE, TOP, GRADE, GEAR, TORQUE }
 
 /**
  * The full field catalog — live metrics plus averages, max, NP/IF/VI, lap & last-lap variants,
@@ -223,6 +223,13 @@ val FIELD_SPECS: List<FieldSpec> = listOf(
     FieldSpec(DataType.Type.INTENSITY_FACTOR, "IF", FieldKind.RATIO, unit = "IF"),
     FieldSpec(DataType.Type.VARIABILITY_INDEX, "VI", FieldKind.RATIO, unit = "VI"),
     FieldSpec(DataType.Type.TRAINING_STRESS_SCORE, "TSS", FieldKind.NUMBER, unit = "TSS"),
+    // ---- torque (N·m at the crank, from the power meter) on its own hammer glyph. [unit] is the
+    //      icons-off readout ("Nm avg"); [suffix] is the icons-on tag beside the hammer ("avg") ----
+    FieldSpec(DataType.Type.TORQUE, "TORQUE", FieldKind.NUMBER, HudIcon.TORQUE, unit = "Nm", valueField = DataType.Field.TORQUE),
+    FieldSpec(DataType.Type.SMOOTHED_3S_AVERAGE_TORQUE, "3S TORQUE", FieldKind.NUMBER, HudIcon.TORQUE, unit = "Nm 3s", suffix = "3s", valueField = DataType.Field.TORQUE),
+    FieldSpec(DataType.Type.AVERAGE_TORQUE, "AVG TORQUE", FieldKind.NUMBER, HudIcon.TORQUE, unit = "Nm avg", suffix = "avg", valueField = DataType.Field.TORQUE),
+    FieldSpec(DataType.Type.MAX_TORQUE, "MAX TORQUE", FieldKind.NUMBER, HudIcon.TORQUE, unit = "Nm max", suffix = "max", valueField = DataType.Field.TORQUE),
+    FieldSpec(DataType.Type.TORQUE_LAP, "LAP TORQUE", FieldKind.NUMBER, HudIcon.TORQUE, unit = "Nm lap", suffix = "lap", valueField = DataType.Field.TORQUE),
     // ---- time, named for what they time ----
     FieldSpec(DataType.Type.ELAPSED_TIME, "RIDE TIME", FieldKind.TIME, HudIcon.TIME, unit = "ride", valueField = DataType.Field.ELAPSED_TIME),
     FieldSpec(DataType.Type.ELAPSED_TIME_LAP, "LAP TIME", FieldKind.TIME, HudIcon.TIME, unit = "lap", valueField = DataType.Field.ELAPSED_TIME),
@@ -456,6 +463,8 @@ object FieldFormat {
         DataType.Type.ELEVATION_GRADE,
         // The only field on the cog icon, so it shows the glyph alone.
         DataType.Type.SHIFTING_GEARS,
+        // Live torque owns the hammer; its 3s/avg/max/lap variants tag it.
+        DataType.Type.TORQUE,
     )
 
     /**
