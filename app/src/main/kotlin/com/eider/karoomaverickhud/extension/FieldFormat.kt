@@ -394,6 +394,9 @@ data class RadarOverlay(
  *                severity colour ([gradeColor]/[avgGradeColor]).
  *  - [climbLabel]  "CLIMB n/total" when the route exposes the climb index, else "CLIMB".
  *  - [profile]   the filled, grade-coloured silhouette (null when no route elevation is available).
+ *  - [tte] / [tteColor]  time to exhaustion ([TimeToExhaustion]) beside MPA, e.g. "4:30" or "--";
+ *                null when the estimator isn't running (no MPA extension) — the slot is then omitted.
+ *                Joined in the pipeline tail via [withTte], since the estimator has its own flow.
  * Built by [FieldFormat.climbOverlay]; null when not on a climb (the overlay then doesn't draw).
  */
 data class ClimbOverlay(
@@ -406,7 +409,12 @@ data class ClimbOverlay(
     val avgGradeColor: HudColor,
     val climbLabel: String,
     val profile: ClimbProfileData?,
-)
+    val tte: String? = null,
+    val tteColor: HudColor = HudColor.WHITE,
+) {
+    /** This overlay with the TTE slot filled from the estimator's [cell] (null clears it). */
+    fun withTte(cell: HudCell?): ClimbOverlay = copy(tte = cell?.value, tteColor = cell?.color ?: HudColor.WHITE)
+}
 
 /**
  * Mid-workout centre overlay: the interval countdown plus lap avg and NP power (the current

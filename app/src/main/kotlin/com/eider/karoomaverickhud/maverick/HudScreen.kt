@@ -197,13 +197,15 @@ class HudScreen : Screen(420f, 150f) {
     private val radarLine2 = Text()
 
     // On-climb overlay (a centre overlay shown while climbing): a climb label, the grade/avg-grade
-    // headline, the vertical/horizontal remaining and an optional MPA readout, plus a grade-coloured
+    // headline, the vertical/horizontal remaining and an optional MPA + time-to-exhaustion readout
+    // ([climbMpa] / [climbTte], sharing one line), plus a grade-coloured
     // elevation silhouette ([climbBars]) with a "you" position marker ([climbMarker]) in the bottom
     // third. The bars are filled Rects (one per profile bucket), tinted by their local grade.
     private val climbLabel = Text()
     private val climbGrade = Text()
     private val climbDist = Text()
     private val climbMpa = Text()
+    private val climbTte = Text()
     private val climbBars = Array(ClimbProfile.BUCKETS) { Rect() }
     private val climbMarker = Rect()
 
@@ -532,6 +534,14 @@ class HudScreen : Screen(420f, 150f) {
             .setForegroundColor(LABEL_RGBA)
             .setVisibility(false)
             .addTo(this)
+        climbTte
+            .setText("")
+            .setResource(Font.StockFont.Small)
+            .setTextAlign(Align.left)
+            .setXY(screenW / 2f + CLIMB_PAIR_GAP, CLIMB_MPA_Y)
+            .setForegroundColor(EvsColor.White.rgba)
+            .setVisibility(false)
+            .addTo(this)
     }
 
     /** Build the centre control window's box, signal bars and brightness slider (all hidden). */
@@ -743,12 +753,35 @@ class HudScreen : Screen(420f, 150f) {
             .setVisibility(true)
         // Vertical metres to the summit (↕) and horizontal distance to the end (↔).
         climbDist.setText("↕ ${climb.toTop}   ↔ ${climb.toEnd}").setVisibility(true)
-        if (climb.mpa != null) {
-            climbMpa.setText("MPA ${climb.mpa}").setVisibility(true)
-        } else {
-            climbMpa.setText("").setVisibility(false)
-        }
+        renderClimbPower(climb)
         renderClimbProfile(climb.profile)
+    }
+
+    /**
+     * The MPA / time-to-exhaustion line. With both, they sit astride the centre — MPA (grey)
+     * right-anchored just left of it, TTE (urgency-coloured) left-anchored just right of it — so the
+     * pair stays put as the values change width. With only MPA it centres alone. TTE is only ever
+     * shown alongside MPA, since it's derived from it.
+     */
+    private fun renderClimbPower(climb: ClimbOverlay) {
+        val mpa = climb.mpa
+        if (mpa == null) {
+            climbMpa.setText("").setVisibility(false)
+            climbTte.setText("").setVisibility(false)
+            return
+        }
+        val tte = climb.tte
+        if (tte == null) {
+            climbMpa.setText("MPA $mpa").setTextAlign(Align.center)
+                .setXY(screenW / 2f, CLIMB_MPA_Y).setVisibility(true)
+            climbTte.setText("").setVisibility(false)
+        } else {
+            climbMpa.setText("MPA $mpa").setTextAlign(Align.right)
+                .setXY(screenW / 2f - CLIMB_PAIR_GAP, CLIMB_MPA_Y).setVisibility(true)
+            climbTte.setText("TTE $tte")
+                .setForegroundColor(colorRgba(climb.tteColor))
+                .setVisibility(true)
+        }
     }
 
     /**
@@ -856,6 +889,7 @@ class HudScreen : Screen(420f, 150f) {
         climbGrade.setVisibility(false)
         climbDist.setVisibility(false)
         climbMpa.setVisibility(false)
+        climbTte.setVisibility(false)
         hideClimbProfile()
     }
 
@@ -1103,6 +1137,8 @@ class HudScreen : Screen(420f, 150f) {
         private const val CLIMB_GRADE_Y = 26f
         private const val CLIMB_DIST_Y = 52f
         private const val CLIMB_MPA_Y = 74f
+        /** Half-gap between the MPA and TTE readouts either side of the centre line. */
+        private const val CLIMB_PAIR_GAP = 6f
         private const val CLIMB_PROF_LEFT = 110f
         private const val CLIMB_PROF_RIGHT = 310f
         private const val CLIMB_PROF_TOP_Y = 100f

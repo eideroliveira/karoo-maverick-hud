@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.scan
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -286,6 +287,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         // just omits the MPA slot. The stream itself is subscribed only inside the radar-gated branch
         // below, so it costs nothing while the feature is off. Watts come from the field's single value.
         val mpaId = KarooDataTypeCatalog.mpaDataTypeId(applicationContext)
+        // One shared MPA subscription for both consumers (the on-climb overlay and the TTE
+        // estimator); it only runs while one of them is collecting, and drops its cached value when
+        // neither is, so a later resubscribe never replays a stale reading.
+        val mpaWattsFlow = if (mpaId == null) {
+            flowOf<Double?>(null)
+        } else {
+            karoo.streamDataFlow(mpaId)
+                .map { (it as? StreamState.Streaming)?.dataPoint?.singleValue }
+                .shareIn(scope, SharingStarted.WhileSubscribed(0, 0), replay = 1)
+        }
 
         // The on-climb centre overlay (replaces the old pinned climb page): a live summary —
         // MPA, vertical-to-summit, horizontal-to-end, current grade over the average grade still to
@@ -298,17 +309,12 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 if (!enabled) {
                     flowOf(null)
                 } else {
-                    val mpaSource = if (mpaId == null) {
-                        flowOf<Double?>(null)
-                    } else {
-                        karoo.streamDataFlow(mpaId).map { (it as? StreamState.Streaming)?.dataPoint?.singleValue }
-                    }
                     combine(
                         routeFlow,
                         karoo.streamDataFlow(DataType.Type.CLIMB),
                         gradeFlow,
                         karoo.streamDataFlow(DataType.Type.DISTANCE_TO_DESTINATION),
-                        mpaSource,
+                        mpaWattsFlow,
                     ) { route, climbState, gradeState, dtd, mpa ->
                         val progress = route?.let {
                             RouteRadar.routeProgress(it.routeDistance, RouteRadar.distanceToDestination(dtd))
@@ -466,6 +472,40 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             }
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+        // Time-to-exhaustion estimator for the synthetic [TimeToExhaustion.FIELD_TTE] field and the
+        // on-climb overlay's TTE slot. Stateful (it learns the rider's MPA drain rate across efforts),
+        // so like block·rep it lives in its own persistent flow. Runs whenever the field is on a page
+        // or the climb overlay is on, so the drain rate is already learned by the time a climb starts.
+        // Power and MPA are sampled together once a second — the estimator smooths power and fits
+        // the MPA slope over time, so it wants an even cadence, not every stream arrival.
+        // Emits the cell (null when unused); a constant "--" cell when no MPA extension is installed.
+        val tteFlow = configFlow
+            .map { cfg ->
+                val onPage = TimeToExhaustion.FIELD_TTE in cfg.workoutPage ||
+                    TimeToExhaustion.FIELD_TTE in cfg.segmentPage ||
+                    cfg.pages.any { TimeToExhaustion.FIELD_TTE in it }
+                onPage || cfg.radarEnabled
+            }
+            .distinctUntilChanged()
+            .flatMapLatest { enabled ->
+                when {
+                    !enabled -> flowOf(null)
+                    mpaId == null -> flowOf(TimeToExhaustion.cell(null))
+                    else -> combine(
+                        karoo.streamDataFlow(DataType.Type.POWER)
+                            .map { (it as? StreamState.Streaming)?.dataPoint?.values?.get(DataType.Field.POWER) },
+                        mpaWattsFlow,
+                    ) { power, mpa -> power to mpa }
+                        .sample(TimeToExhaustion.SAMPLE_MS)
+                        .scan(TimeToExhaustion.INITIAL) { state, (power, mpa) ->
+                            state.advance(System.currentTimeMillis(), power, mpa, configFlow.value.ftp)
+                        }
+                        .map { TimeToExhaustion.cell(it.tteSec) }
+                        .distinctUntilChanged()
+                }
+            }
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
         val cellsPipeline = layoutFlow.flatMapLatest { layout ->
             // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
             // CADENCE colouring needs the live power reading for its under-gear rule, and the
@@ -473,9 +513,9 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             // "value/target" mid-workout even when no target field is on a page. The target
             // streams are Idle outside a workout, so the extra subscriptions cost nothing.
             val displayed = layout.pages.asSequence().flatten().distinct().toList()
-            // The block·rep field is synthetic (computed in [blockRepFlow], not a Karoo stream) — keep
-            // it out of the subscription set.
-            val streamIds = displayed.filterNot { WorkoutBlocks.isSynthetic(it) }
+            // The block·rep and TTE fields are synthetic (computed in [blockRepFlow] / [tteFlow], not
+            // Karoo streams) — keep them out of the subscription set.
+            val streamIds = displayed.filterNot { WorkoutBlocks.isSynthetic(it) || TimeToExhaustion.isSynthetic(it) }
             val ids = buildList {
                 addAll(streamIds)
                 if (DataType.Type.CADENCE in streamIds && DataType.Type.POWER !in streamIds) add(DataType.Type.POWER)
@@ -517,6 +557,18 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                     climb = onClimb,
                 )
             }.combine(workoutOverlayFlow) { frame, workout -> frame.copy(workout = workout) }
+                .combine(tteFlow) { frame, tte ->
+                    // Inject the TTE cell (when the field is on a page) and fill the climb overlay's
+                    // TTE slot beside MPA.
+                    if (tte == null) {
+                        frame
+                    } else {
+                        frame.copy(
+                            cells = frame.cells + (TimeToExhaustion.FIELD_TTE to tte),
+                            climb = frame.climb?.withTte(tte),
+                        )
+                    }
+                }
                 .combine(gearShiftFlow) { frame, gearShift ->
                     // In the brief window after a shift, tag the GEAR cell with the coloured new
                     // ratio. If the GEAR field isn't on any page (no cell to tag), nothing happens.

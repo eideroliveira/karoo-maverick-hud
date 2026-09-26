@@ -9,6 +9,7 @@ package com.eider.karoomaverickhud.settings.ui
 import com.eider.karoomaverickhud.extension.FieldFormat
 import com.eider.karoomaverickhud.extension.HudFontSize
 import com.eider.karoomaverickhud.extension.NextClimb
+import com.eider.karoomaverickhud.extension.TimeToExhaustion
 import com.eider.karoomaverickhud.extension.cellsForRows
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -134,7 +135,9 @@ fun rememberDemoValues(): Map<String, DemoVal> {
         }
     }
     return remember(tick) {
-        com.eider.karoomaverickhud.extension.FIELD_SPECS.associate { spec -> spec.id to demoFor(spec) }
+        com.eider.karoomaverickhud.extension.FIELD_SPECS.associate { spec -> spec.id to demoFor(spec) } +
+            // Synthetic TTE field (no FieldSpec): the same demo reading the glasses mirror shows.
+            (TimeToExhaustion.FIELD_TTE to DemoVal(TimeToExhaustion.previewCell().value, null))
     }
 }
 
@@ -180,6 +183,7 @@ private fun demoFor(spec: com.eider.karoomaverickhud.extension.FieldSpec): DemoV
 private fun cellColor(field: UiField?, demo: DemoVal?, cfg: HudConfig): Color {
     if (field == null) return K.zWhite
     if (field.id == "TYPE_PEDAL_POWER_BALANCE_ID") return previewBalanceColor(demo?.numeric)
+    if (TimeToExhaustion.isSynthetic(field.id)) return TimeToExhaustion.previewCell().color.toComposeColor()
     return previewColorFor(field, demo?.numeric, cfg.ftp, cfg.maxHr, cfg.idealCadence, cfg.ftpZones, cfg.hrZones)
 }
 
