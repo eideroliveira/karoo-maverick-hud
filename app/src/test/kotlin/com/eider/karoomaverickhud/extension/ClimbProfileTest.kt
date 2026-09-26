@@ -160,6 +160,23 @@ class ClimbProfileTest {
     }
 
     @Test
+    fun overlayTakesTheTteSlotFromTheEstimatorCell() {
+        val climbState = streaming(
+            DataType.Type.CLIMB,
+            DataType.Field.DISTANCE_TO_TOP to 800.0,
+            DataType.Field.ELEVATION_TO_TOP to 40.0,
+        )
+        val gradeState = streaming(DataType.Type.ELEVATION_GRADE, DataType.Field.ELEVATION_GRADE to 5.0)
+        val o = FieldFormat.climbOverlay(climbState, gradeState, mpaWatts = 320.0, profile = null, imperial = false)!!
+        assertNull(o.tte) // no estimator joined yet → slot omitted
+        val withTte = o.withTte(TimeToExhaustion.cell(45.0))
+        assertEquals("0:45", withTte.tte)
+        assertEquals(HudColor.RED, withTte.tteColor)
+        assertEquals("--", o.withTte(TimeToExhaustion.cell(null)).tte)
+        assertNull(withTte.withTte(null).tte)
+    }
+
+    @Test
     fun overlayIsNullWhenNotOnAClimb() {
         // Both remaining fields zero / Idle stream → not on a climb.
         val off = streaming(

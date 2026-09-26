@@ -33,8 +33,9 @@ object HudPreviewBuilder {
             // "current/target" composite (with range colouring) the rider sees mid-workout.
             val ctx = workoutPreviewCtx(pageIds, cfg, zones, gear, seed)
             return pageIds.map { id ->
-                // The block·rep field is synthetic (no stream) — render its preview cell directly.
+                // The block·rep and TTE fields are synthetic (no stream) — render their preview cells directly.
                 if (WorkoutBlocks.isSynthetic(id)) WorkoutBlocks.previewCell()
+                else if (TimeToExhaustion.isSynthetic(id)) TimeToExhaustion.previewCell()
                 else FieldFormat.format(id, demoState(id, cfg, seed), cfg.imperial, zones, ctx, gear)
             }
         }
@@ -73,7 +74,7 @@ object HudPreviewBuilder {
         cfg.imperial,
     )
 
-    /** Demo on-climb overlay (mid-climb, ~150 m of ascent left, grade-coloured profile) for both previews. */
+    /** Demo on-climb overlay (mid-climb, ~150 m of ascent left, grade-coloured profile, MPA + TTE) for both previews. */
     fun demoClimb(cfg: HudConfig): ClimbOverlay? {
         val climbState = StreamState.Streaming(
             DataPoint(
@@ -90,6 +91,7 @@ object HudPreviewBuilder {
             DataPoint(dataTypeId = DataType.Type.ELEVATION_GRADE, values = mapOf(DataType.Field.ELEVATION_GRADE to 8.5)),
         )
         return FieldFormat.climbOverlay(climbState, gradeState, mpaWatts = cfg.ftp * 1.6, profile = demoClimbProfile(), imperial = cfg.imperial)
+            ?.withTte(TimeToExhaustion.previewCell())
     }
 
     /** A rising, grade-coloured silhouette for the demo climb profile. */

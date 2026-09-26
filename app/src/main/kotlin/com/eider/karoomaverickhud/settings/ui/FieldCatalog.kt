@@ -15,6 +15,7 @@ import com.eider.karoomaverickhud.extension.HR_ZONE_COLORS
 import com.eider.karoomaverickhud.extension.HudColor
 import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.POWER_ZONE_COLORS
+import com.eider.karoomaverickhud.extension.TimeToExhaustion
 import com.eider.karoomaverickhud.extension.WorkoutBlocks
 import com.eider.karoomaverickhud.extension.ZoneBand
 import com.eider.karoomaverickhud.extension.zoneIndexByPct
@@ -76,12 +77,14 @@ private fun uiUnit(spec: FieldSpec): String {
 
 /**
  * The fields the HUD can render, derived from the renderer's [FIELD_SPECS] catalog, plus the
- * synthetic block·rep field (computed in the pipeline, not a Karoo stream, so it isn't in FIELD_SPECS).
+ * synthetic block·rep and time-to-exhaustion fields (computed in the pipeline, not Karoo streams, so
+ * they aren't in FIELD_SPECS).
  */
 val UI_FIELDS: Map<String, UiField> = FIELD_SPECS.associate { spec ->
     val icon = ICON_OVERRIDES[spec.id] ?: iconName(spec.kind)
     spec.id to UiField(spec.id, spec.label, uiUnit(spec), icon, zoneKind(spec.kind))
-} + (WorkoutBlocks.FIELD_REP to UiField(WorkoutBlocks.FIELD_REP, WorkoutBlocks.LABEL, WorkoutBlocks.UNIT, "time", null))
+} + (WorkoutBlocks.FIELD_REP to UiField(WorkoutBlocks.FIELD_REP, WorkoutBlocks.LABEL, WorkoutBlocks.UNIT, "time", null)) +
+    (TimeToExhaustion.FIELD_TTE to UiField(TimeToExhaustion.FIELD_TTE, TimeToExhaustion.LABEL, TimeToExhaustion.UNIT, "time", null))
 
 /**
  * Fields provided by other installed extensions (MPA, time to summit, …), discovered at runtime and
@@ -97,7 +100,7 @@ fun uiFieldFor(id: String): UiField? = UI_FIELDS[id] ?: ExtensionFieldRegistry.f
 
 /** Picker grouping (name → field ids). */
 val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
-    "Power" to listOf(DataType.Type.POWER, DataType.Type.AVERAGE_POWER, DataType.Type.MAX_POWER, DataType.Type.NORMALIZED_POWER),
+    "Power" to listOf(DataType.Type.POWER, DataType.Type.AVERAGE_POWER, DataType.Type.MAX_POWER, DataType.Type.NORMALIZED_POWER, TimeToExhaustion.FIELD_TTE),
     "Torque" to listOf(DataType.Type.TORQUE, DataType.Type.SMOOTHED_3S_AVERAGE_TORQUE, DataType.Type.AVERAGE_TORQUE, DataType.Type.MAX_TORQUE, DataType.Type.TORQUE_LAP),
     "Cadence" to listOf(DataType.Type.CADENCE, DataType.Type.AVERAGE_CADENCE),
     "Heart" to listOf(DataType.Type.HEART_RATE, DataType.Type.AVERAGE_HR, DataType.Type.MAX_HR),
