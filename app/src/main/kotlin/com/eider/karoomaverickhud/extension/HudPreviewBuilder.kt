@@ -149,6 +149,11 @@ object HudPreviewBuilder {
             DataType.Type.AVERAGE_SPEED -> mapOf(DataType.Field.AVERAGE_SPEED to (29.6 / 3.6))
             DataType.Type.DISTANCE -> mapOf(DataType.Field.DISTANCE to 42_100.0)
             DataType.Type.ELAPSED_TIME -> mapOf(DataType.Field.ELAPSED_TIME to 5_070_000.0) // 1:24:30 in ms
+            // Torque ≈ power / crank angular speed: ~FTP at ideal cadence lands in the mid-20s N·m.
+            DataType.Type.TORQUE, DataType.Type.SMOOTHED_3S_AVERAGE_TORQUE ->
+                mapOf(DataType.Field.TORQUE to (cfg.ftp * (0.70 + jit() * 0.40)) / (cfg.idealCadence.coerceAtLeast(1) * 2 * Math.PI / 60))
+            DataType.Type.AVERAGE_TORQUE, DataType.Type.TORQUE_LAP -> mapOf(DataType.Field.TORQUE to 27.0)
+            DataType.Type.MAX_TORQUE -> mapOf(DataType.Field.TORQUE to 78.0)
             DataType.Type.PEDAL_POWER_BALANCE -> mapOf(DataType.Field.PEDAL_POWER_BALANCE_LEFT to 51.0)
             DataType.Type.SHIFTING_GEARS -> mapOf(
                 DataType.Field.SHIFTING_FRONT_GEAR_TEETH to cfg.gear.front.last().toDouble(),

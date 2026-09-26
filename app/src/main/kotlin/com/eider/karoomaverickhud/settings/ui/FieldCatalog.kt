@@ -13,6 +13,7 @@ import com.eider.karoomaverickhud.extension.FieldKind
 import com.eider.karoomaverickhud.extension.FieldSpec
 import com.eider.karoomaverickhud.extension.HR_ZONE_COLORS
 import com.eider.karoomaverickhud.extension.HudColor
+import com.eider.karoomaverickhud.extension.HudIcon
 import com.eider.karoomaverickhud.extension.POWER_ZONE_COLORS
 import com.eider.karoomaverickhud.extension.TimeToExhaustion
 import com.eider.karoomaverickhud.extension.WorkoutBlocks
@@ -48,12 +49,13 @@ private fun iconName(kind: FieldKind): String = when (kind) {
 
 /**
  * Per-field icon overrides — most fields take their glyph from [iconName] by kind, but a few own a
- * dedicated glyph that the kind alone can't express (the climb's distance-to-top, and grade as "%").
+ * dedicated glyph that the kind alone can't express (the climb's distance-to-top, grade as "%",
+ * and the torque family's hammer).
  */
 private val ICON_OVERRIDES: Map<String, String> = mapOf(
     DataType.Type.DISTANCE_TO_TOP to "totop",
     DataType.Type.ELEVATION_GRADE to "percent",
-)
+) + FIELD_SPECS.filter { it.icon == HudIcon.TORQUE }.associate { it.id to "torque" }
 
 private fun zoneKind(kind: FieldKind): ZoneKind? = when (kind) {
     FieldKind.POWER -> ZoneKind.POWER
@@ -99,6 +101,7 @@ fun uiFieldFor(id: String): UiField? = UI_FIELDS[id] ?: ExtensionFieldRegistry.f
 /** Picker grouping (name → field ids). */
 val UI_FIELD_GROUPS: List<Pair<String, List<String>>> = listOf(
     "Power" to listOf(DataType.Type.POWER, DataType.Type.AVERAGE_POWER, DataType.Type.MAX_POWER, DataType.Type.NORMALIZED_POWER, TimeToExhaustion.FIELD_TTE),
+    "Torque" to listOf(DataType.Type.TORQUE, DataType.Type.SMOOTHED_3S_AVERAGE_TORQUE, DataType.Type.AVERAGE_TORQUE, DataType.Type.MAX_TORQUE, DataType.Type.TORQUE_LAP),
     "Cadence" to listOf(DataType.Type.CADENCE, DataType.Type.AVERAGE_CADENCE),
     "Heart" to listOf(DataType.Type.HEART_RATE, DataType.Type.AVERAGE_HR, DataType.Type.MAX_HR),
     "Speed & distance" to listOf(DataType.Type.SPEED, DataType.Type.AVERAGE_SPEED, DataType.Type.MAX_SPEED, DataType.Type.DISTANCE),
