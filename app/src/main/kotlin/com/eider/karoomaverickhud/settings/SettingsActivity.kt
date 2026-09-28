@@ -132,8 +132,10 @@ private fun SettingsRoot(autoPair: Boolean) {
     // destroyed), so we must gate the preview on this — otherwise the loop keeps pushing demo
     // frames forever and the HUD stays stuck on random data instead of resuming realtime.
     var inForeground by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
+    // Poll only while on-screen: a paused settings activity (rider back on the ride) would otherwise
+    // keep waking the Karoo every second for a readout nobody can see.
+    LaunchedEffect(inForeground) {
+        while (inForeground) {
             linkConnected = runCatching { Evs.instance().comm().isConnected() }.getOrDefault(false)
             delay(1_000)
         }
