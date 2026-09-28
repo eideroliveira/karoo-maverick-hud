@@ -78,8 +78,8 @@ fun HubScreen(
 ) {
     val totalFields = cfg.pages.sumOf { it.size }
     val dt = matchingDrivetrain(cfg.gear.drivetrainId, cfg.gear.front, cfg.gear.rear)
-    // The preview tours every layout the glasses can raise: the numbered pages, the on-climb page,
-    // the next-climb radar and the trajectory map (the latter two when enabled).
+    // The preview tours every layout the glasses can raise: the numbered pages, then the on-climb
+    // summary, the next-climb radar and the trajectory map (the latter two when enabled) as centre overlays.
     val scenes = previewScenes(cfg)
     val sceneIndex = previewPage.coerceIn(0, (scenes.size - 1).coerceAtLeast(0))
     val scene = scenes.getOrNull(sceneIndex) ?: PreviewScene("PAGE 1", emptyList())
