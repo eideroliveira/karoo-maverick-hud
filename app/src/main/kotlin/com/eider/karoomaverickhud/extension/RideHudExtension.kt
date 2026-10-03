@@ -16,6 +16,8 @@ import com.eider.karoomaverickhud.settings.raceBasePages
 import com.eider.karoomaverickhud.settings.SettingsActivity
 import io.hammerhead.karooext.KarooSystemService
 import io.hammerhead.karooext.extension.KarooExtension
+import io.hammerhead.karooext.models.ActiveRidePage
+import io.hammerhead.karooext.models.ActiveRideProfile
 import io.hammerhead.karooext.internal.Emitter
 import io.hammerhead.karooext.models.DataType
 import io.hammerhead.karooext.models.Device
@@ -62,6 +64,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var maverick: MaverickBridge
     private lateinit var deviceProvider: MaverickDeviceProvider
     private lateinit var rideStateFlow: StateFlow<RideState>
+    // A profile is selected but not recording yet — the glasses show live fields (see [PreRide]).
+    private lateinit var preRideFlow: StateFlow<Boolean>
     // Effects dispatched before the Karoo service binds are dropped, so alerts wait for this.
     private val karooConnected = MutableStateFlow(false)
 
@@ -93,6 +97,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         rideStateFlow = karoo.consumerFlow<RideState>()
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
+
+        preRideFlow = merge(
+            karoo.consumerFlow<ActiveRideProfile>().map { PreRide.Signal.ProfileShown },
+            karoo.consumerFlow<ActiveRidePage>().map { PreRide.Signal.ProfileShown },
+            rideStateFlow.map { PreRide.Signal.Ride(it) },
+        ).scan(PreRide.State()) { state, signal -> PreRide.reduce(state, signal) }
+            .map { it.active }
+            .distinctUntilChanged()
+            .onEach { Timber.i("Pre-ride fields ${if (it) "on" else "off"}") }
+            .stateIn(scope, SharingStarted.Eagerly, false)
 
         // The bridge keeps the link always-connected (not ride-gated); it uses the ride-state feed
         // only to decide reconnect effort for absent glasses (re-arm the fast window on a ride start,
@@ -175,7 +189,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     /**
      * Streams the selected fields into HUD snapshots. The Karoo's native sensor cadence is
      * ~1 Hz, so we sample at 1000 ms. Ride state rides along in each snapshot so the glasses
-     * show "waiting for ride" when idle and the HUD when recording.
+     * show "waiting for ride" when idle and the HUD when recording — or pre-ride, once a profile
+     * is selected (the streams already run while idle; only the screen changes).
      *
      * The whole pipeline runs only while the glasses are linked: every Karoo stream below is shared
      * [whileLinked], and the tail collects nothing while [MaverickBridge.connectionState] is false.
@@ -632,12 +647,13 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .flatMapLatest { linked ->
                 if (linked) refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) } else emptyFlow()
             }
-            .combine(rideStateFlow) { frame, ride ->
+            .combine(combine(rideStateFlow, preRideFlow, ::Pair)) { frame, (ride, preRide) ->
                 HudSnapshot(
                     pages = frame.layout.pages.map { page -> page.map { id -> frame.cells[id] ?: HudCell.blank(id) } },
                     paused = ride is RideState.Paused,
                     recording = ride is RideState.Recording,
                     pageIndex = 0,
+                    preRide = preRide,
                     pinnedPage = frame.layout.pinnedPage,
                     rows = configFlow.value.rows,
                     clock = if (configFlow.value.showClock) currentClock() else "",

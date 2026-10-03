@@ -306,13 +306,19 @@ enum class HudFontSize { SMALL, MEDIUM, LARGE }
 
 /**
  * What the glasses render now: one list of [HudCell] per page, the current page, and ride
- * state (so the screen shows "waiting for ride" when idle and the HUD when recording).
+ * state (so the screen shows "waiting for ride" when idle, and the HUD when recording or when a
+ * profile is up pre-ride).
  */
 data class HudSnapshot(
     val pages: List<List<HudCell>>,
     val paused: Boolean,
     val recording: Boolean,
     val pageIndex: Int,
+    /**
+     * A ride profile is selected on the Karoo but recording hasn't started (see [PreRide]): render
+     * the data fields live instead of the "waiting for ride" screen.
+     */
+    val preRide: Boolean = false,
     /**
      * Index of a page that should take over the display (a live Strava segment or climb auto-page).
      * The bridge snaps to it on the rising edge and suppresses auto-cycling while it's set; null
