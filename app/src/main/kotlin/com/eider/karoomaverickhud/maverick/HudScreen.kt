@@ -646,8 +646,9 @@ class HudScreen : Screen(420f, 150f) {
         // [User request: don't render the string ECO]
         ecoText.setVisibility(false)
 
-        // Connected to the Karoo but no ride yet — show a holding message, blank the grid.
-        if (!snap.recording && !snap.paused) {
+        // Connected to the Karoo but no ride and no profile up yet — show a holding message, blank
+        // the grid. With a profile selected pre-ride the live fields render below instead.
+        if (!snap.recording && !snap.paused && !snap.preRide) {
             for (i in 0 until cellCount) blankCell(i)
             hideTrajectory()
             hideRadar()
@@ -683,7 +684,14 @@ class HudScreen : Screen(420f, 150f) {
             else -> { hideTrajectory(); hideRadar(); hideClimb(); hideWorkout() }
         }
 
-        pauseDot.setText(if (snap.paused) "‖ PAUSED" else "")
+        // Pre-ride, the sign-in notice (if any) keeps its slot from the waiting screen.
+        pauseDot.setText(
+            when {
+                snap.paused -> "‖ PAUSED"
+                snap.preRide -> notice.orEmpty()
+                else -> ""
+            },
+        )
     }
 
     /**
