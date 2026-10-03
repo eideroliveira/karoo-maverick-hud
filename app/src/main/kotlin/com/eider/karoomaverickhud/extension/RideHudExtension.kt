@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -94,7 +95,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             .stateIn(scope, SharingStarted.Eagerly, RideState.Idle)
 
         // The bridge keeps the link always-connected (not ride-gated); it uses the ride-state feed
-        // only to re-arm its fast connect-retry window when a ride starts. It also needs a way to
+        // only to decide reconnect effort for absent glasses (re-arm the fast window on a ride start,
+        // slow-retry only mid-ride). It also needs a way to
         // take a lap (temple-pad double-tap) — that's ours to dispatch, it holds no Karoo service.
         maverick.start(rideStateFlow) { markLap() }
 
@@ -165,31 +167,44 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     companion object {
         /** Broadcast sent by a tap on the Karoo data field — toggles battery-saver when connected, else reconnects/pairs. */
         const val ACTION_GLASSES_TAP = "com.eider.karoomaverickhud.GLASSES_TAP"
+
+        /** How long the ride streams outlive a glasses drop before unsubscribing (see [startPipeline]). */
+        private const val LINK_GRACE_MS = 60_000L
     }
 
     /**
      * Streams the selected fields into HUD snapshots. The Karoo's native sensor cadence is
      * ~1 Hz, so we sample at 1000 ms. Ride state rides along in each snapshot so the glasses
      * show "waiting for ride" when idle and the HUD when recording.
+     *
+     * The whole pipeline runs only while the glasses are linked: every Karoo stream below is shared
+     * [whileLinked], and the tail collects nothing while [MaverickBridge.connectionState] is false.
+     * With no glasses there is no one to draw for, so the Karoo keeps no sensor/location consumers
+     * open for us and does no per-second formatting work.
      */
     @Suppress("OPT_IN_USAGE")
     private fun startPipeline() {
         val configFlow = HudPreferences.flow(applicationContext)
             .stateIn(scope, SharingStarted.Eagerly, HudConfig.DEFAULT)
 
+        // Sharing policy for every stream-backed flow below: live only while the linked tail is
+        // collecting, kept alive [LINK_GRACE_MS] past a drop so a brief dropout doesn't reset the
+        // stateful trackers (block·rep, TTE, descent gate) mid-ride.
+        val whileLinked = SharingStarted.WhileSubscribed(LINK_GRACE_MS)
+
         // Whether a structured workout is loaded — WORKOUT_STEP_COUNT only streams non-zero while
         // a workout file is present. Gates the (user-editable) workout page below.
         val workoutActiveFlow = karoo.streamDataFlow(DataType.Type.WORKOUT_INTERVAL_COUNT)
             .map { FieldFormat.workoutActive(it) }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, false)
+            .stateIn(scope, whileLinked, false)
 
         // A Strava live segment is running (segment fields stream a positive distance-remaining only
         // while on a segment). Gates and pins the segment auto-page.
         val segmentActiveFlow = karoo.streamDataFlow(DataType.Type.SEGMENT_DISTANCE_REMAINING)
             .map { FieldFormat.segmentActive(it) }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, false)
+            .stateIn(scope, whileLinked, false)
 
         // On a climb (Karoo ClimbPro) — distance/elevation-to-top stream positive only on a climb.
         // Used to hand off from the next-climb preview to the on-climb overlay (below); no longer
@@ -197,7 +212,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         val climbActiveFlow = karoo.streamDataFlow(DataType.Type.CLIMB)
             .map { FieldFormat.climbActive(it) }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, false)
+            .stateIn(scope, whileLinked, false)
 
         // The loaded route — climbs + total length (for the radar) and the decoded path geometry
         // (for the trajectory map). Null whenever navigation is idle or following a free destination
@@ -216,16 +231,16 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // Live position + heading (for projecting the trajectory map) and live grade (descent
         // detection + the map's grade readout). Both quiet to a safe default off-ride.
         val locationFlow = karoo.consumerFlow<OnLocationChanged>()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
         val gradeFlow = karoo.streamDataFlow(DataType.Type.ELEVATION_GRADE)
-            .stateIn(scope, SharingStarted.Eagerly, StreamState.Idle)
+            .stateIn(scope, whileLinked, StreamState.Idle)
         val trajSpeedFlow = karoo.streamDataFlow(DataType.Type.SPEED)
-            .stateIn(scope, SharingStarted.Eagerly, StreamState.Idle)
+            .stateIn(scope, whileLinked, StreamState.Idle)
 
         // The heading-up trajectory to draw in the centre of the current page, gated by a debounced,
         // hysteretic descent decision ([DescentGate]) so it neither flickers as the grade hovers nor
@@ -260,7 +275,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             next to traj
-        }.map { it.second }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, null)
+        }.map { it.second }.distinctUntilChanged().stateIn(scope, whileLinked, null)
 
         // The climb the rider is approaching, or null when none is within the look-ahead window
         // (~45 s out, capped at 1 km). Gated on the radar toggle so its streams cost nothing when
@@ -287,7 +302,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // MPA (Maximal Power Available, a Xert-style extension field) for the on-climb overlay,
         // discovered once by label. Null id when no MPA extension is installed — the overlay then
@@ -333,7 +348,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // Mid-workout centre overlay: the interval countdown plus avg/NP power, drawn on every page
         // except the workout page itself (the renderer suppresses it there via
@@ -361,7 +376,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // Gear-change tag: whenever the resolved gear changes, append the new ratio to the live GEAR
         // field for [GearShift.VISIBLE_MS] after the last change, colour-coded by how the ratio moved
@@ -401,7 +416,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
             }
             .distinctUntilChanged()
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // The only auto-page gate that still creates a pinned page is a live Strava segment. The
         // next-climb radar, the on-climb summary/profile and the descent trajectory all now draw as
@@ -410,7 +425,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
         // once the rider is actually on the climb.)
         val autoPagesFlow = segmentActiveFlow
             .map { AutoPages(segment = it) }
-            .distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, AutoPages())
+            .distinctUntilChanged().stateIn(scope, whileLinked, AutoPages())
 
         // Display labels for any extension-provided fields the rider added to a page (MPA, time to
         // summit, …) so the generic renderer can unit-label them. Discovered once at start.
@@ -477,7 +492,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         .distinctUntilChanged()
                 }
             }
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         // Time-to-exhaustion estimator for the synthetic [TimeToExhaustion.FIELD_TTE] field and the
         // on-climb overlay's TTE slot. Stateful (it learns the rider's MPA drain rate across efforts),
@@ -511,7 +526,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                         .distinctUntilChanged()
                 }
             }
-            .stateIn(scope, SharingStarted.Eagerly, null)
+            .stateIn(scope, whileLinked, null)
 
         val cellsPipeline = layoutFlow.flatMapLatest { layout ->
             // Hidden helper streams (subscribed but never rendered, so only [ids] grows):
@@ -610,7 +625,13 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
             }
         }.distinctUntilChanged()
 
-        refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) }
+        // Gate on the glasses link: while disconnected nothing is collected, so (after the grace
+        // period) every stream above unsubscribes. The link coming up restarts the whole pipeline,
+        // and its first frame mounts the HUD screen (see [MaverickBridge.update]).
+        maverick.connectionState
+            .flatMapLatest { linked ->
+                if (linked) refreshFlow.flatMapLatest { intervalMs -> cellsPipeline.sample(intervalMs) } else emptyFlow()
+            }
             .combine(rideStateFlow) { frame, ride ->
                 HudSnapshot(
                     pages = frame.layout.pages.map { page -> page.map { id -> frame.cells[id] ?: HudCell.blank(id) } },
