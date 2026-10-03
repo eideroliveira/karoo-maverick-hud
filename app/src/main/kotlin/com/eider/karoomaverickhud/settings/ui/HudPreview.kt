@@ -8,6 +8,7 @@ package com.eider.karoomaverickhud.settings.ui
 
 import com.eider.karoomaverickhud.extension.FieldFormat
 import com.eider.karoomaverickhud.extension.HudFontSize
+import com.eider.karoomaverickhud.extension.HudPreviewBuilder
 import com.eider.karoomaverickhud.extension.NextClimb
 import com.eider.karoomaverickhud.extension.TimeToExhaustion
 import com.eider.karoomaverickhud.extension.cellsForRows
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -49,6 +52,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -61,13 +65,14 @@ import kotlin.random.Random
 data class DemoVal(val display: String, val numeric: Double?)
 
 /** The centre overlay a preview scene draws over the page's clear centre (mirrors HudScreen). */
-enum class PreviewOverlay { NONE, RADAR, TRAJECTORY }
+enum class PreviewOverlay { NONE, CLIMB, RADAR, TRAJECTORY }
 
 /**
  * One scene the hub's live preview cycles through: a data page ([fields]) plus an optional centre
  * [overlay]. Beyond the rider's numbered pages, the preview tours the route layouts the glasses raise
- * on a ride — the on-climb page, and the next-climb radar / heading-up trajectory overlays (which the
- * glasses draw over the clear centre of whatever page is showing), so the rider sees each beforehand.
+ * on a ride — the on-climb summary, the next-climb radar and the heading-up trajectory, all centre
+ * overlays the glasses draw over the clear middle of whatever page is showing — so the rider sees
+ * each beforehand.
  */
 data class PreviewScene(
     /** Short caption shown under the lens (e.g. "PAGE 1", "CLIMB", "NEXT-CLIMB RADAR"). */
@@ -79,17 +84,18 @@ data class PreviewScene(
 )
 
 /**
- * The scenes the hub preview cycles through: the rider's numbered pages, then the on-climb auto-page
- * and — when enabled — the next-climb radar and the trajectory map. Radar/trajectory are centre
- * overlays the glasses draw over the current page, so the preview shows them over the first page,
- * exactly as they appear mid-ride. A faithful tour of every layout the rider can meet.
+ * The scenes the hub preview cycles through: the rider's numbered pages, then the on-climb summary
+ * and — when enabled — the next-climb radar and the trajectory map. All three are centre overlays the
+ * glasses draw over the current page, so the preview shows them over the first page, exactly as they
+ * appear mid-ride. Same order as the on-glasses mirror ([HudPreviewBuilder.snapshot]) so the lens and
+ * the glasses agree scene-for-scene.
  */
 fun previewScenes(cfg: HudConfig): List<PreviewScene> {
     val cap = cellsForRows(cfg.rows)
     val base = cfg.pages.firstOrNull()?.take(cap) ?: cfg.climbPage.take(cap)
     return buildList {
         cfg.pages.forEachIndexed { i, p -> add(PreviewScene("PAGE ${i + 1}", p.take(cap))) }
-        add(PreviewScene("CLIMB", cfg.climbPage.take(cap)))
+        add(PreviewScene("CLIMB", base, PreviewOverlay.CLIMB))
         if (cfg.radarEnabled) add(PreviewScene("NEXT-CLIMB RADAR", base, PreviewOverlay.RADAR))
         if (cfg.trajectoryEnabled) add(PreviewScene("TRAJECTORY", base, PreviewOverlay.TRAJECTORY))
     }
@@ -283,10 +289,11 @@ fun GlassesPreview(
     val lensH = 208.dp
     val colH = 172.dp
     LensBox(width, lensHeight = lensH) {
-        // The page cells always draw the two edge columns; radar / trajectory are centre overlays the
-        // glasses paint over the clear middle, so they sit on top of the cells (as on the Maverick).
+        // The page cells always draw the two edge columns; climb / radar / trajectory are centre
+        // overlays the glasses paint over the clear middle, so they sit on top of the cells (as on the Maverick).
         PageCells(cfg, scene.fields, values, colH, showCenterDot = scene.overlay == PreviewOverlay.NONE)
         when (scene.overlay) {
+            PreviewOverlay.CLIMB -> ClimbOverlayCells(cfg)
             PreviewOverlay.RADAR -> RadarOverlayCells(cfg)
             PreviewOverlay.TRAJECTORY -> TrajectoryOverlayCells()
             PreviewOverlay.NONE -> {}
@@ -309,7 +316,7 @@ fun GlassesPreview(
     }
 }
 
-/** A data page (numbered or climb): the centre fixation dot + the two edge columns of cells. */
+/** A data page: the centre fixation dot + the two edge columns of cells. */
 @Composable
 private fun BoxScope.PageCells(
     cfg: HudConfig,
@@ -320,7 +327,7 @@ private fun BoxScope.PageCells(
 ) {
     val big = page.size <= 4
     val (left, right) = columnOrder(page.size)
-    // centre fixation dot — suppressed when a centre overlay (radar / trajectory) takes the middle.
+    // centre fixation dot — suppressed when a centre overlay (climb / radar / trajectory) takes the middle.
     if (showCenterDot) {
         Box(Modifier.align(Alignment.Center).size(6.dp).clip(RoundedCornerShape(3.dp))
             .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(3.dp)))
@@ -338,6 +345,81 @@ private fun BoxScope.PageCells(
         }
     }
 }
+
+/**
+ * The on-climb centre overlay, mirroring HudScreen.renderClimb on its native 420×150 canvas (centred in
+ * the taller lens so the glasses geometry carries over 1:1): a cyan climb label, the "grade / avg%"
+ * headline tinted by the current grade, "↕ toTop   ↔ toEnd", the MPA / TTE line, and the
+ * grade-coloured elevation silhouette with a white position marker in the bottom third. The content is
+ * the mirror's own [HudPreviewBuilder.demoClimb], so both previews show the same climb.
+ */
+@Composable
+private fun BoxScope.ClimbOverlayCells(cfg: HudConfig) {
+    val climb = HudPreviewBuilder.demoClimb(cfg) ?: return
+    Box(Modifier.align(Alignment.Center).size(420.dp, 150.dp)) {
+        // Profile first, so the summary text draws over it if they ever overlap (as on the glasses).
+        val profile = climb.profile
+        if (profile != null && profile.bars.isNotEmpty()) {
+            Canvas(Modifier.matchParentSize()) {
+                val u = size.width / 420f // design unit → px
+                val left = CLIMB_PROF_LEFT * u
+                val w = (CLIMB_PROF_RIGHT - CLIMB_PROF_LEFT) * u
+                val top = CLIMB_PROF_TOP_Y * u
+                val base = CLIMB_PROF_BASE_Y * u
+                val h = base - top
+                profile.bars.forEach { bar ->
+                    val bh = (bar.heightFrac * h).coerceAtLeast(2f * u)
+                    drawRect(
+                        bar.color.toComposeColor(),
+                        topLeft = Offset(left + bar.startFrac * w, base - bh),
+                        // +1 unit so adjacent columns don't hairline-gap (mirrors HudScreen)
+                        size = Size((bar.endFrac - bar.startFrac) * w + u, bh),
+                    )
+                }
+                val mx = left + profile.progressFrac * w
+                drawRect(K.zWhite, topLeft = Offset(mx - u, top), size = Size(2f * u, h))
+            }
+        }
+        @Composable
+        fun Line(text: String, y: Float, color: Color, modifier: Modifier = Modifier) =
+            KText(text, color = color, size = 17.sp, weight = FontWeight.Bold, family = CondFamily,
+                maxLines = 1, softWrap = false, align = TextAlign.Center,
+                modifier = modifier.fillMaxWidth().offset(y = y.dp))
+        Line(climb.climbLabel, CLIMB_LABEL_Y, K.zCyan)
+        Line("${climb.grade} / ${climb.avgGrade}%", CLIMB_GRADE_Y, climb.gradeColor.toComposeColor())
+        Line("↕ ${climb.toTop}   ↔ ${climb.toEnd}", CLIMB_DIST_Y, K.zWhite)
+        // MPA / TTE: with both, they sit astride the centre — MPA (grey) right-anchored just left of
+        // it, TTE (urgency-coloured) left-anchored just right of it; MPA alone centres. TTE never
+        // shows without MPA, since it's derived from it.
+        val mpa = climb.mpa
+        val tte = climb.tte
+        if (mpa != null && tte == null) {
+            Line("MPA $mpa", CLIMB_MPA_Y, Lens.label)
+        } else if (mpa != null && tte != null) {
+            Row(Modifier.fillMaxWidth().offset(y = CLIMB_MPA_Y.dp)) {
+                Box(Modifier.weight(1f).padding(end = CLIMB_PAIR_GAP.dp), contentAlignment = Alignment.CenterEnd) {
+                    KText("MPA $mpa", color = Lens.label, size = 17.sp, weight = FontWeight.Bold,
+                        family = CondFamily, maxLines = 1, softWrap = false)
+                }
+                Box(Modifier.weight(1f).padding(start = CLIMB_PAIR_GAP.dp), contentAlignment = Alignment.CenterStart) {
+                    KText("TTE $tte", color = climb.tteColor.toComposeColor(), size = 17.sp,
+                        weight = FontWeight.Bold, family = CondFamily, maxLines = 1, softWrap = false)
+                }
+            }
+        }
+    }
+}
+
+// On-climb overlay geometry on the 420×150 glasses canvas — mirrors HudScreen's CLIMB_* consts.
+private const val CLIMB_LABEL_Y = 6f
+private const val CLIMB_GRADE_Y = 26f
+private const val CLIMB_DIST_Y = 52f
+private const val CLIMB_MPA_Y = 74f
+private const val CLIMB_PAIR_GAP = 6f
+private const val CLIMB_PROF_LEFT = 110f
+private const val CLIMB_PROF_RIGHT = 310f
+private const val CLIMB_PROF_TOP_Y = 100f
+private const val CLIMB_PROF_BASE_Y = 146f
 
 /**
  * The next-climb radar centre overlay, mirroring HudScreen.renderRadar: a cyan "NEXT CLIMB" title and
