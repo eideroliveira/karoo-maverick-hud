@@ -2,10 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- EvsKit authenticates the secured link by generating a certificate from the
-         Everysight server using sdk.key; without INTERNET the handshake fails and the
-         glasses drop the connection right after connecting. -->
+    <!-- EvsKit authenticates the secured link with a per-glasses certificate downloaded from
+         the Everysight server using the app key, then cached. INTERNET is needed whenever that
+         cache is missing, expired or from another app version (see CertificateKeeper). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Watch for connectivity so the glasses certificate is refreshed while online (CertificateKeeper). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- EvsKit scans with a location-based model (it checks isGpsEnabled), so we do NOT
          set neverForLocation here — that flag makes the scan return no devices. -->

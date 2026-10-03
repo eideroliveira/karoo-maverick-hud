@@ -408,6 +408,10 @@ fun GlassesScreen(
     onCenterY: (Int) -> Unit,
     onConfigure: () -> Unit,
     onAdjust: () -> Unit,
+    /** Why the glasses won't connect (rider-facing), shown while disconnected; null when nothing's wrong. */
+    issue: String? = null,
+    /** Whether the glasses can sign in without internet; null before any glasses have signed in. */
+    signInStatus: String? = null,
 ) {
     ScreenScroll {
         KSectionLabel("Connection")
@@ -440,6 +444,15 @@ fun GlassesScreen(
                     KButton("Pair Maverick", icon = "search", variant = KBtnVariant.Primary, modifier = Modifier.fillMaxWidth(), onClick = onPair)
                 }
             }
+        }
+
+        if (!connected && issue != null) {
+            KText(issue, color = K.bad, size = 15.sp, lineHeight = 21.sp,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp))
+        }
+        if (signInStatus != null) {
+            KText(signInStatus, color = K.text2, size = 15.sp, lineHeight = 21.sp,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp))
         }
 
         if (gpsBlocked) {

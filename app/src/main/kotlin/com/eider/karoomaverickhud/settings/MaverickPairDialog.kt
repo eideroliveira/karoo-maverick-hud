@@ -149,13 +149,18 @@ fun MaverickPairDialog(onDismiss: () -> Unit, onPaired: (address: String, name: 
                                     status = "Connecting to ${device.name}…\n" +
                                         "When the glasses show a code, enter it here."
                                     scope.launch {
+                                        var failedWith: String? = null
                                         val ok = connectMaverick(device) { err ->
-                                            status = "Glasses error: $err"
+                                            // The rider-facing explanation (e.g. "needs internet"),
+                                            // falling back to the raw SDK code.
+                                            val msg = MaverickLink.issue.value?.detail ?: "Glasses error: $err"
+                                            failedWith = msg
+                                            status = msg
                                         }
                                         if (ok) {
                                             onPaired(device.address, device.name)
                                         } else {
-                                            if (!status.startsWith("Glasses error")) {
+                                            if (failedWith == null) {
                                                 status = "Couldn't connect to ${device.name}. Tap a device to retry."
                                             }
                                             connectingAddress = null
