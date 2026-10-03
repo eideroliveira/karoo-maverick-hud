@@ -120,11 +120,20 @@ class MaverickBridge(
     // re-arms the fast-retry window when a ride starts (so a backed-off link reconnects promptly).
     private var rideState: StateFlow<RideState>? = null
 
-    // Wall-clock deadline for the *fast* connect-retry window. Past it the loop keeps retrying but
-    // at the slow idle cadence, so a paired-but-absent device stops hammering the BLE radio while
-    // still recovering on its own. Re-armed on a fresh start, a drop after a good connect, a ride
-    // start, or a live preview.
+    // Wall-clock deadline for the *fast* connect-retry window. Past it a paired-but-absent device
+    // stops hammering the BLE radio (see [nextSlowAttemptAt]). Re-armed on a fresh start, a drop
+    // after a good connect, a ride start, a pairing, or a data-field tap.
     @Volatile private var retryUntil = 0L
+
+    // Past the fast window, a paired-but-absent device is only retried mid-ride, on a doubling
+    // backoff ([SLOW_RETRY_MIN_MS] → [SLOW_RETRY_MAX_MS]) that [armRetry] resets. Off-ride nothing is
+    // attempted at all, so glasses left at home cost the Karoo's radio nothing.
+    @Volatile private var nextSlowAttemptAt = 0L
+    @Volatile private var slowBackoffMs = SLOW_RETRY_MIN_MS
+
+    // When the SDK's current connect attempt began (0 = none in flight), so an attempt that hangs
+    // against an absent device can be abandoned instead of holding the radio indefinitely.
+    private var connectingSince = 0L
 
     // Centre control-window state (toggled by long-tap). Brightness 0..100, signal 0..3 bars.
     @Volatile private var controlOpen = false
@@ -184,6 +193,8 @@ class MaverickBridge(
     /** Open a fresh connect-retry window. */
     private fun armRetry() {
         retryUntil = System.currentTimeMillis() + CONNECT_WINDOW_MS
+        slowBackoffMs = SLOW_RETRY_MIN_MS
+        nextSlowAttemptAt = 0L
     }
 
     /**
@@ -607,9 +618,11 @@ class MaverickBridge(
      * stays up, reconnecting on drops.
      *
      * Reconnect cadence is bounded to spare the Karoo's battery. After a fresh start, a drop, a ride
-     * start, or a live preview we fast-retry for [CONNECT_WINDOW_MS]; past that the loop keeps
-     * retrying but at the slow [IDLE_POLL_INTERVAL_MS] cadence, so a pair that's been switched off
-     * stops the futile fast scans yet still reconnects on its own when it comes back.
+     * start, a pairing, or a data-field tap we fast-retry for [CONNECT_WINDOW_MS]. Past that the
+     * radio is left alone off-ride; mid-ride we retry on a doubling backoff capped at
+     * [SLOW_RETRY_MAX_MS], abandoning any attempt still pending after [CONNECT_ATTEMPT_TIMEOUT_MS].
+     * So glasses that are switched off (or left at home) stop costing BLE scans, yet a ride still
+     * picks them up on its own when they come back.
      *
      * The over-the-air reads are also trimmed: brightness/auto are seeded on connect and re-read
      * only while the control window is open (the user is the only thing that changes them), and
@@ -644,8 +657,8 @@ class MaverickBridge(
                     // re-arm the fast-retry window so we work to get back promptly.
                     if (justDropped) armRetry()
                     // "Reconnecting…" state for the data-field status tile.
-                    GlassesLinkState.connecting.value =
-                        !connected && runCatching { comm.isConnecting() }.getOrDefault(false)
+                    val connectingNow = !connected && runCatching { comm.isConnecting() }.getOrDefault(false)
+                    GlassesLinkState.connecting.value = connectingNow
 
                     if (connected) {
                         // Battery (ride-limiting resource + status tile + BatteryWarn slowdown):
@@ -691,24 +704,43 @@ class MaverickBridge(
                         GlassesLinkState.signal.value = 0
                     }
                     // The fast-retry window covers a live preview (rider in settings, wants the link
-                    // now) and the bounded window after a start/drop/ride. Past it we still attempt,
-                    // just at the slow idle cadence chosen below.
+                    // now) and the bounded window after a start/drop/ride/pair/tap. Past it, only a
+                    // ride earns further attempts, on a doubling backoff; off-ride an absent pair is
+                    // left alone until something re-arms the window.
+                    val now = System.currentTimeMillis()
                     val previewing = HudState.previewSnapshot.value != null
-                    val armed = previewing || System.currentTimeMillis() < retryUntil
+                    val armed = previewing || now < retryUntil
+                    val riding = rideState?.value.let { it != null && it !is RideState.Idle }
 
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
-                    if (pairedId != null && !connected && !comm.isConnecting()) {
-                        // The SDK can lose its configured device across process restarts; restore
-                        // it from our prefs so a ride reliably reconnects instead of sitting idle.
-                        if (!comm.hasConfiguredDevice()) {
-                            Timber.i("Restoring configured device $pairedId from prefs")
-                            runCatching { comm.setDeviceInfo(pairedId, cfg.maverickDeviceName ?: "") }
-                                .onFailure { Timber.w(it, "setDeviceInfo restore failed") }
-                        }
-                        if (comm.hasConfiguredDevice()) {
-                            Timber.i("Auto-connecting to Maverick")
-                            comm.connectSecured()
+                    connectingSince = if (connectingNow) connectingSince.takeIf { it != 0L } ?: now else 0L
+                    if (pairedId != null && !connected) {
+                        if (connectingNow) {
+                            // An attempt against glasses that aren't there can sit "connecting" (and
+                            // scanning) indefinitely. Inside the window that's the point; past it, cut
+                            // the attempt loose so the radio goes quiet until the next backoff slot.
+                            if (!armed && now - connectingSince >= CONNECT_ATTEMPT_TIMEOUT_MS) {
+                                Timber.i("Abandoning Maverick connect attempt after ${now - connectingSince} ms")
+                                runCatching { comm.disconnect() }.onFailure { Timber.w(it, "abort connect failed") }
+                                connectingSince = 0L
+                            }
+                        } else if (armed || (riding && now >= nextSlowAttemptAt)) {
+                            // The SDK can lose its configured device across process restarts; restore
+                            // it from our prefs so a ride reliably reconnects instead of sitting idle.
+                            if (!comm.hasConfiguredDevice()) {
+                                Timber.i("Restoring configured device $pairedId from prefs")
+                                runCatching { comm.setDeviceInfo(pairedId, cfg.maverickDeviceName ?: "") }
+                                    .onFailure { Timber.w(it, "setDeviceInfo restore failed") }
+                            }
+                            if (comm.hasConfiguredDevice()) {
+                                Timber.i("Auto-connecting to Maverick (armed=$armed backoff=${slowBackoffMs}ms)")
+                                comm.connectSecured()
+                            }
+                            if (!armed) {
+                                nextSlowAttemptAt = now + slowBackoffMs
+                                slowBackoffMs = minOf(slowBackoffMs * 2, SLOW_RETRY_MAX_MS)
+                            }
                         }
                     }
 
@@ -719,7 +751,12 @@ class MaverickBridge(
                         connected && Eco.active.value -> maxOf(CONNECTED_INTERVAL_MS, SaverTuning.SAVER_POLL_MS)
                         connected -> CONNECTED_INTERVAL_MS       // hold the link, catch drops
                         armed -> CONNECT_RETRY_INTERVAL_MS       // fast retry within the window
-                        else -> IDLE_POLL_INTERVAL_MS            // backed off; slow retry, still recovers
+                        // An attempt is in flight: watch it closely so a success is picked up (and
+                        // the HUD pipeline started) promptly, or a hang is abandoned on time.
+                        connectingNow -> CONNECTED_INTERVAL_MS
+                        // Backed off: just a cheap local-state check. Mid-ride the attempts
+                        // themselves are spaced by the backoff, off-ride there are none.
+                        else -> IDLE_POLL_INTERVAL_MS
                     }
                 }.onFailure { Timber.w(it, "connection loop error") }
                 delay(nextDelay)
@@ -782,6 +819,8 @@ class MaverickBridge(
             return TapResult.SAVER
         }
         if (configState.value.maverickDeviceId == null) return TapResult.NEEDS_PAIR
+        // The rider is asking for the link now — give it a full fast window, not just one attempt.
+        armRetry()
         forceReconnect()
         return TapResult.RECONNECTING
     }
@@ -830,8 +869,14 @@ class MaverickBridge(
         private const val CONNECTED_INTERVAL_MS = 4_000L
         /** Disconnected but still inside the fast-retry window: retry briskly. */
         private const val CONNECT_RETRY_INTERVAL_MS = 2_000L
-        /** Backed-off retry cadence once the fast window passes (still recovers on its own). */
+        /** Loop tick once the fast window passes — local state checks only, no radio work. */
         private const val IDLE_POLL_INTERVAL_MS = 30_000L
+        /** First mid-ride slow retry after the fast window lapses; doubles per failed attempt. */
+        private const val SLOW_RETRY_MIN_MS = 30_000L
+        /** Cap on the mid-ride slow-retry backoff (a data-field tap reconnects at once regardless). */
+        private const val SLOW_RETRY_MAX_MS = 5 * 60_000L
+        /** Past the fast window, abandon a connect attempt still pending after this long. */
+        private const val CONNECT_ATTEMPT_TIMEOUT_MS = 45_000L
         /** How often to refresh the glasses battery % over the air; it moves ~1%/min. */
         private const val BATTERY_INTERVAL_MS = 60_000L
     }
