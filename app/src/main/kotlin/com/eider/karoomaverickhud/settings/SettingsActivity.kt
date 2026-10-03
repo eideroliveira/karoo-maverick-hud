@@ -47,6 +47,9 @@ import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.eider.karoomaverickhud.maverick.CertificateKeeper
+import com.eider.karoomaverickhud.maverick.GlassesCertificate
+import com.eider.karoomaverickhud.maverick.MaverickLink
 import com.eider.karoomaverickhud.settings.ui.CondFamily
 import com.eider.karoomaverickhud.settings.ui.DisplayScreen
 import com.eider.karoomaverickhud.settings.ui.GearScreen
@@ -63,6 +66,8 @@ import com.everysight.evskit.android.Evs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
+import java.text.DateFormat
+import java.util.Date
 
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -148,6 +153,10 @@ private fun SettingsRoot(autoPair: Boolean) {
     val brightnessLive by com.eider.karoomaverickhud.maverick.GlassesLinkState.brightness.collectAsState()
     val autoBrightness by com.eider.karoomaverickhud.maverick.GlassesLinkState.autoBrightness.collectAsState()
     val brightness = brightnessLive ?: 0
+    // Sign-in health for the Glasses screen: what's blocking the link, and whether offline sign-in works.
+    val linkIssue by MaverickLink.issue.collectAsState()
+    val certStatus by CertificateKeeper.status.collectAsState()
+    val online by CertificateKeeper.online.collectAsState()
     var settingsResumeTick by remember { mutableStateOf(0) }
     LaunchedEffect(linkConnected, settingsResumeTick) {
         if (linkConnected) runCatching {
@@ -307,6 +316,10 @@ private fun SettingsRoot(autoPair: Boolean) {
                     },
                     onConfigure = { runCatching { Evs.instance().showUI("configure") }.onFailure { Timber.w(it, "configure") } },
                     onAdjust = { runCatching { Evs.instance().showUI("adjust") }.onFailure { Timber.w(it, "adjust") } },
+                    issue = linkIssue?.detail,
+                    signInStatus = GlassesCertificate.summary(certStatus, System.currentTimeMillis(), online) {
+                        DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(it))
+                    },
                 )
                 "display" -> DisplayScreen(cfg, ctx, scope)
             }

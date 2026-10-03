@@ -179,6 +179,43 @@ class MaverickBridge(
         startPageCycler()
         startPreviewObserver()
         startSaverObserver()
+        startSignInWatcher()
+    }
+
+    /**
+     * React to the glasses' ability to sign in (see [CertificateKeeper]):
+     *  - Internet returning, or a fresh certificate landing, re-arms the fast connect window — a
+     *    sign-in that failed offline can now succeed, so don't wait out the slow idle cadence.
+     *  - Show a notice on the glasses' waiting screen when the next offline sign-in is at risk, so
+     *    the rider can get the Karoo online before leaving rather than find out on the road.
+     */
+    private fun startSignInWatcher() {
+        scope.launch {
+            combine(CertificateKeeper.online, CertificateKeeper.status) { online, status ->
+                online || GlassesCertificate.offlineReady(status, System.currentTimeMillis())
+            }.distinctUntilChanged().collect { canSignIn ->
+                if (canSignIn && !_connectionState.value) {
+                    Timber.i("Glasses can sign in again — re-arming connect window")
+                    armRetry()
+                }
+            }
+        }
+        scope.launch {
+            combine(CertificateKeeper.online, CertificateKeeper.status) { online, status ->
+                signInNotice(online, status, System.currentTimeMillis())
+            }.distinctUntilChanged().collect { hudScreen.notice = it }
+        }
+    }
+
+    /** Waiting-screen warning when offline sign-in won't survive, or is about to lapse; null if fine. */
+    private fun signInNotice(online: Boolean, status: CertStatus?, now: Long): String? {
+        if (online || status == null) return null // online: the keeper tops the certificate up
+        val days = GlassesCertificate.daysLeft(status, now)
+        return when {
+            days == null -> "OFFLINE SIGN-IN NOT READY"
+            days < GlassesCertificate.WARN_DAYS -> "OFFLINE SIGN-IN: ${days}D LEFT"
+            else -> null
+        }
     }
 
     /** Open a fresh connect-retry window. */
@@ -695,6 +732,11 @@ class MaverickBridge(
                     // just at the slow idle cadence chosen below.
                     val previewing = HudState.previewSnapshot.value != null
                     val armed = previewing || System.currentTimeMillis() < retryUntil
+                    // A sign-in that failed for want of internet fails the same way on every retry
+                    // (each one a BLE connect + handshake), so hold at the slow cadence until the
+                    // Karoo is online — startSignInWatcher re-arms the moment it is.
+                    val waitingForNetwork = MaverickLink.issue.value?.waitsForNetwork == true &&
+                        !CertificateKeeper.online.value
 
                     val cfg = configState.value
                     val pairedId = cfg.maverickDeviceId
@@ -718,6 +760,7 @@ class MaverickBridge(
                         // (never slows a reconnect — that path stays on the fast cadences below).
                         connected && Eco.active.value -> maxOf(CONNECTED_INTERVAL_MS, SaverTuning.SAVER_POLL_MS)
                         connected -> CONNECTED_INTERVAL_MS       // hold the link, catch drops
+                        waitingForNetwork -> IDLE_POLL_INTERVAL_MS // retrying can't succeed yet
                         armed -> CONNECT_RETRY_INTERVAL_MS       // fast retry within the window
                         else -> IDLE_POLL_INTERVAL_MS            // backed off; slow retry, still recovers
                     }

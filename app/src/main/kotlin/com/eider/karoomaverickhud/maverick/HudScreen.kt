@@ -260,6 +260,12 @@ class HudScreen : Screen(420f, 150f) {
     // [setWorkoutPowerVisible] while the workout overlay is showing; the countdown always stays.
     @Volatile private var showWorkoutPower = true
 
+    /**
+     * Sign-in warning for the waiting screen (e.g. offline sign-in about to lapse), set by the
+     * bridge; replaces the "KAROO CONNECTED" line there. Null shows the normal line.
+     */
+    @Volatile var notice: String? = null
+
     fun apply(next: HudSnapshot) {
         snapshot = next
     }
@@ -648,7 +654,7 @@ class HudScreen : Screen(420f, 150f) {
             hideClimb()
             hideWorkout()
             statusText.setText("WAITING FOR RIDE")
-            pauseDot.setText("KAROO CONNECTED")
+            pauseDot.setText(notice ?: "KAROO CONNECTED")
             return
         }
 
@@ -1065,11 +1071,12 @@ class HudScreen : Screen(420f, 150f) {
 
     /**
      * Folds glasses-side UI state that isn't in the snapshot (control window + trajectory zoom +
-     * workout-power toggle) into one int, so onUpdateUI re-renders on a change even when the pushed
-     * snapshot is unchanged.
+     * workout-power toggle + sign-in notice) into one int, so onUpdateUI re-renders on a change even
+     * when the pushed snapshot is unchanged.
      */
     private fun controlSignature(): Int {
         var h = if (controlOpen) 1 else 0
+        h = h * 131 + notice.hashCode()
         h = h * 131 + ctrlBrightness
         h = h * 131 + (if (ctrlAuto) 1 else 0)
         h = h * 131 + ctrlSignal

@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import com.eider.karoomaverickhud.maverick.Eco
 import com.eider.karoomaverickhud.maverick.MaverickBridge
+import com.eider.karoomaverickhud.maverick.MaverickLink
 import com.eider.karoomaverickhud.maverick.SaverTuning
 import com.eider.karoomaverickhud.settings.HudPreferences
 import com.eider.karoomaverickhud.settings.HudConfig
@@ -25,12 +26,14 @@ import io.hammerhead.karooext.models.OnLocationChanged
 import io.hammerhead.karooext.models.OnNavigationState
 import io.hammerhead.karooext.models.RideState
 import io.hammerhead.karooext.models.StreamState
+import io.hammerhead.karooext.models.SystemNotification
 import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -58,6 +61,8 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
     private lateinit var maverick: MaverickBridge
     private lateinit var deviceProvider: MaverickDeviceProvider
     private lateinit var rideStateFlow: StateFlow<RideState>
+    // Effects dispatched before the Karoo service binds are dropped, so alerts wait for this.
+    private val karooConnected = MutableStateFlow(false)
 
     // In-ride field that shows the Maverick at a glance (battery, signal, brightness). Reads the
     // process-wide GlassesLinkState, so it needs no reference to [maverick]; a tap broadcasts
@@ -82,6 +87,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         karoo.connect { connected ->
             Timber.i("Karoo system connected=$connected")
+            karooConnected.value = connected
         }
 
         rideStateFlow = karoo.consumerFlow<RideState>()
@@ -101,6 +107,7 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
 
         startPipeline()
         startMaverickHealthMonitor()
+        startLinkIssueAlerts()
     }
 
     /**
@@ -716,6 +723,60 @@ class RideHudExtension : KarooExtension("maverick_hud", "0.1.0") {
                 }
                 lastConnected = connected
             }
+        }
+    }
+
+    /**
+     * Explain on the Karoo why the glasses won't come up (see [MaverickLink.issue]) — a failed
+     * sign-in leaves the glasses blank, so they can't say it themselves. Each distinct issue posts
+     * one Control Center notification (retries repeat the same issue and stay quiet), plus an
+     * in-ride alert if a ride is running or once one starts while it's still unresolved.
+     */
+    private fun startLinkIssueAlerts() {
+        scope.launch {
+            var notified: String? = null
+            var alertedThisRide: String? = null
+            combine(
+                MaverickLink.issue,
+                rideStateFlow.map { it !is RideState.Idle }.distinctUntilChanged(),
+                karooConnected,
+            ) { issue, riding, up -> Triple(issue, riding, up) }
+                .collect { (issue, riding, up) ->
+                    if (!riding) alertedThisRide = null
+                    if (issue == null) {
+                        notified = null
+                        alertedThisRide = null
+                        return@collect
+                    }
+                    if (!issue.alert || !up) return@collect
+                    if (issue.id != notified) {
+                        Timber.i("Link issue ${issue.id}: ${issue.detail}")
+                        karoo.dispatch(
+                            SystemNotification(
+                                id = "maverick-link",
+                                header = "Maverick HUD",
+                                message = issue.title,
+                                subText = issue.detail,
+                                style = SystemNotification.Style.ERROR,
+                            ),
+                        )
+                        notified = issue.id
+                    }
+                    if (riding && issue.id != alertedThisRide) {
+                        karoo.dispatch(
+                            InRideAlert(
+                                id = "maverick-link",
+                                icon = com.eider.karoomaverickhud.R.drawable.ic_hud,
+                                title = "Glasses: ${issue.title}",
+                                detail = issue.detail,
+                                autoDismissMs = 10_000L,
+                                backgroundColor = com.eider.karoomaverickhud.R.color.hud_alert_bg,
+                                textColor = com.eider.karoomaverickhud.R.color.hud_alert_text,
+                            ),
+                        )
+                        alertedThisRide = issue.id
+                    }
+                }
         }
     }
 }
